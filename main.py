@@ -6,8 +6,7 @@ import cv2
 import matplotlib.pyplot as plt
 from tkinter import Tk, Button, Label, Scale, HORIZONTAL, Menu, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
-from skimage.feature import graycomatrix, graycoprops
-from skimage.measure import shannon_entropy
+
 # Definir nome do diretório
 path_input_dir = Path("../trabalhoPAI")
 path_data = path_input_dir / "dataset_liver_bmodes_steatosis_assessment_IJCARS.mat"
@@ -46,7 +45,10 @@ class ImageViewer:
         # Opções dentro do submenu de ROI
         self.roi_menu.add_command(label="Selecionar ROI", command=self.select_roi)
         self.roi_menu.add_command(label="Mostrar Histograma da ROI", command=self.show_histogram)
-        self.roi_menu.add_command(label="Calcular GLCM e Descritores de Textura", command=self.calculate_glcm_texture)
+        self.roi_menu.add_command(label="Gerar ROIs Automáticas", command=self.generate_rois_automatic)
+
+        # Adiciona submenu para gerar ROIs manualmente
+        self.roi_menu.add_command(label="Gerar ROIs Manualmente", command=self.generate_rois_manual)
 
         # Adiciona opção para mostrar histograma da imagem completa
         self.file_menu.add_command(label="Mostrar Histograma da Imagem", command=self.show_image_histogram)
@@ -164,77 +166,82 @@ class ImageViewer:
             metrics_text = f"Média: {mean_val:.2f}\nMediana: {median_val:.2f}\nDesvio Padrão: {std_dev:.2f}"
             simpledialog.messagebox.showinfo("Métricas da Imagem", metrics_text)
 
-    def calculate_glcm_texture(self):
-        if self.roi_zoom is not None:
-            # Normalizar os valores de cinza da ROI para 0-255 (se necessário)
-            roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
-
-            # Distâncias para GLCM (1, 2, 4, 8 pixels)
-            distances = [1, 2, 4, 8]
-            angles = [0]  # Usando ângulo 0 para simplificação
-
-            # Inicializar as variáveis para os descritores
-            entropies = []
-            homogeneities = []
-
-            # Calcular GLCM e os descritores para cada distância
-            for d in distances:
-                glcm = graycomatrix(roi_norm, distances=[d], angles=angles, levels=256, symmetric=True, normed=True)
-
-                # Calcular entropia usando a matriz GLCM
-                entropy_val = shannon_entropy(glcm)
-                entropies.append(entropy_val)
-
-                # Calcular homogeneidade
-                homogeneity_val = graycoprops(glcm, 'homogeneity')[0, 0]
-                homogeneities.append(homogeneity_val)
-
-            # Exibir os resultados
-            result_text = "Descritores de Textura (GLCM):\n\n"
-            for i, d in enumerate(distances):
-                result_text += (f"Distância {d} pixels:\n"
-                                f"Entropia: {entropies[i]:.4f}\n"
-                                f"Homogeneidade: {homogeneities[i]:.4f}\n\n")
-
-            messagebox.showinfo("Descritores de Textura (GLCM)", result_text)
-
-    def generate_rois(self):
-        # Se uma imagem foi carregada
+    def generate_rois_automatic(self):
+        # Geração automática das ROIs para o fígado e córtex renal
         if self.img is not None:
-            messagebox.showinfo("Instrução", "Selecione a região do fígado com o mouse.")
-            
-            # Seleciona a ROI do fígado com base na interação do mouse
-            roi_liver = cv2.selectROI("Selecione a ROI do Fígado", self.img)
-            x_liver, y_liver, w_liver, h_liver = roi_liver
-
-            # Seleciona a ROI do rim automaticamente (baseado na localização esperada)
-            # O usuário precisa selecionar a área correta
-            messagebox.showinfo("Instrução", "Agora selecione a região do córtex renal com o mouse.")
-            roi_kidney = cv2.selectROI("Selecione a ROI do Rim", self.img)
-            x_kidney, y_kidney, w_kidney, h_kidney = roi_kidney
-
-            # Recorte as duas ROIs de 28x28 pixels
+            # Coordenadas ajustadas para o fígado
+            x_liver, y_liver = 220, 120
             liver_roi = self.img[y_liver:y_liver+28, x_liver:x_liver+28]
+
+            # Coordenadas ajustadas para o córtex renal
+            x_kidney, y_kidney = 250, 200
             kidney_roi = self.img[y_kidney:y_kidney+28, x_kidney:x_kidney+28]
 
-            # Calcular o valor de HI
+            # Calcular o índice hepatorenal (HI)
             mean_liver = np.mean(liver_roi)
             mean_kidney = np.mean(kidney_roi)
-            hi = mean_liver / mean_kidney if mean_kidney != 0 else 1  # Para evitar divisão por zero
+            hi = mean_liver / mean_kidney if mean_kidney != 0 else 1
 
             # Normalizar a ROI do fígado
             liver_roi_adjusted = liver_roi * hi
             liver_roi_adjusted = np.round(liver_roi_adjusted).astype(np.uint8)
 
-            # Salvar a ROI do fígado em um arquivo
+            # Salvar a ROI do fígado
             roi_filename = f"ROI_{self.current_patient:02d}_{self.current_image}.png"
             cv2.imwrite(roi_filename, liver_roi_adjusted)
             messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
 
-            # Destruir as janelas do OpenCV
-            cv2.destroyAllWindows()
-        else:
-            messagebox.showwarning("Aviso", "Nenhuma imagem carregada. Por favor, carregue uma imagem.")
+            # Exibir as ROIs
+            img_copy = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
+            cv2.rectangle(img_copy, (x_liver, y_liver), (x_liver+28, y_liver+28), (0, 255, 0), 2)  # Verde para o fígado
+            cv2.rectangle(img_copy, (x_kidney, y_kidney), (x_kidney+28, y_kidney+28), (255, 0, 0), 2)  # Azul para o rim
+
+            img_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
+            plt.imshow(img_rgb)
+            plt.title("ROIs Automáticas: Fígado (verde), Rim (azul)")
+            plt.show()
+
+    def generate_rois_manual(self):
+        # Geração manual das ROIs para o fígado e córtex renal com tamanho fixo de 28x28 pixels
+        if self.img is not None:
+            # Selecionar manualmente a posição da ROI do fígado
+            img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
+            roi_liver = cv2.selectROI("Selecione a posição da ROI do Fígado", img_bgr, fromCenter=False, showCrosshair=True)
+            cv2.destroyWindow("Selecione a posição da ROI do Fígado")
+
+            x_liver, y_liver = int(roi_liver[0]), int(roi_liver[1])
+            liver_roi = self.img[y_liver:y_liver+28, x_liver:x_liver+28]
+
+            # Selecionar manualmente a posição da ROI do rim
+            roi_kidney = cv2.selectROI("Selecione a posição da ROI do Rim", img_bgr, fromCenter=False, showCrosshair=True)
+            cv2.destroyWindow("Selecione a posição da ROI do Rim")
+
+            x_kidney, y_kidney = int(roi_kidney[0]), int(roi_kidney[1])
+            kidney_roi = self.img[y_kidney:y_kidney+28, x_kidney:x_kidney+28]
+
+            # Calcular o índice hepatorenal (HI)
+            mean_liver = np.mean(liver_roi)
+            mean_kidney = np.mean(kidney_roi)
+            hi = mean_liver / mean_kidney if mean_kidney != 0 else 1
+
+            # Normalizar a ROI do fígado
+            liver_roi_adjusted = liver_roi * hi
+            liver_roi_adjusted = np.round(liver_roi_adjusted).astype(np.uint8)
+
+            # Salvar a ROI do fígado
+            roi_filename = f"ROI_{self.current_patient:02d}_{self.current_image}.png"
+            cv2.imwrite(roi_filename, liver_roi_adjusted)
+            messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
+
+            # Exibir as ROIs
+            img_copy = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
+            cv2.rectangle(img_copy, (x_liver, y_liver), (x_liver+28, y_liver+28), (0, 255, 0), 2)  # Verde para o fígado
+            cv2.rectangle(img_copy, (x_kidney, y_kidney), (x_kidney+28, y_kidney+28), (255, 0, 0), 2)  # Azul para o rim
+
+            img_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
+            plt.imshow(img_rgb)
+            plt.title("ROIs Manuais: Fígado (verde), Rim (azul)")
+            plt.show()
 
 # Criar janela principal
 root = Tk()
