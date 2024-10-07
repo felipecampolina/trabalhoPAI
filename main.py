@@ -4,19 +4,10 @@ import scipy.io
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-from tkinter import Tk, Button, Label, Scale, HORIZONTAL, Menu, filedialog, simpledialog, messagebox
+from tkinter import Tk, Button, Label, Scale, HORIZONTAL, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, IntVar, Radiobutton, Entry
 from PIL import Image, ImageTk
 from skimage.feature import graycomatrix, graycoprops
 from skimage.measure import shannon_entropy
-
-# Definir nome do diretório
-path_input_dir = Path("../trabalhoPAI")
-path_data = path_input_dir / "dataset_liver_bmodes_steatosis_assessment_IJCARS.mat"
-
-# Carregar dados
-data = scipy.io.loadmat(path_data)
-data_array = data['data']
-images = data_array['images']
 
 # Interface gráfica usando Tkinter
 class ImageViewer:
@@ -33,12 +24,21 @@ class ImageViewer:
         self.menu_bar = Menu(root)
         root.config(menu=self.menu_bar)
 
+        # Menu Arquivos
+        self.arquivos_menu = Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="Arquivos", menu=self.arquivos_menu)
+
+        # Adicionar opções ao menu Arquivos
+        self.arquivos_menu.add_command(label="Carregar banco de imagens (mat)", command=self.load_image_bank)
+        self.arquivos_menu.add_command(label="Carregar imagem (png ou jpg)", command=self.load_image_file)
+        self.arquivos_menu.add_command(label="Visualizar imagens", command=self.visualize_images)
+
         # Menu principal
         self.file_menu = Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Opções", menu=self.file_menu)
 
-        # Adiciona opção para carregar imagem
-        self.file_menu.add_command(label="Carregar Imagem", command=self.load_image)
+        # Alterar o nome para "Carregar para Edição" e adicionar opções
+        self.file_menu.add_command(label="Carregar para Edição", command=self.load_image)
 
         # Submenu para opções de ROI
         self.roi_menu = Menu(self.file_menu, tearoff=0)
@@ -70,32 +70,174 @@ class ImageViewer:
 
         self.zoom_slider = None  # Iniciando sem o slider
         self.img = None
+        self.images = None
+        self.total_patients = 0
+        self.images_per_patient = 0
+        self.current_patient = 0
+        self.current_image = 0
         self.roi = None
         self.roi_zoom = None
         self.intensity_scale = 1
-        self.current_patient = 0
-        self.current_image = 0
         self.zoom_factor = 1  # Controle de zoom inicial
         
-    def load_image(self):
-        # Alternar entre as imagens, variando os pacientes (n) e as imagens (m)
-        self.current_patient = (self.current_patient + 1) % 55  # Existem 55 pacientes (n = 0 a 54)
-        self.current_image = (self.current_image + 1) % 10  # Cada paciente tem 10 imagens (m = 0 a 9)
-        
+    def load_image_bank(self):
+        # Abrir diálogo para selecionar arquivo .mat
+        mat_file_path = filedialog.askopenfilename(title="Selecione o arquivo .mat", filetypes=[("MAT files", "*.mat")])
+        if mat_file_path:
+            # Carregar dados do arquivo .mat selecionado
+            data = scipy.io.loadmat(mat_file_path)
+            data_array = data['data']
+            self.images = data_array['images']
+            self.total_patients = len(self.images[0])
+            self.images_per_patient = len(self.images[0][0])
+            messagebox.showinfo("Sucesso", "Banco de imagens carregado com sucesso!")
+            self.current_patient = 0
+            self.current_image = 0
+        else:
+            messagebox.showwarning("Aviso", "Nenhum arquivo .mat foi selecionado.")
+
+    def load_image_file(self):
+        # Abrir diálogo para selecionar imagem
+        image_file_path = filedialog.askopenfilename(title="Selecione a imagem", filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
+        if image_file_path:
+            # Carregar imagem
+            self.img = cv2.imread(image_file_path, cv2.IMREAD_GRAYSCALE)
+            if self.img is not None:
+                self.show_image()
+            else:
+                messagebox.showerror("Erro", "Não foi possível carregar a imagem selecionada.")
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi selecionada.")
+
+    def visualize_images(self):
+        if self.images is not None:
+            # Criar janela de visualização de imagens
+            self.visualization_window = Toplevel(self.root)
+            self.visualization_window.title("Visualizar Imagens")
+            
+            # Label para exibir a imagem
+            self.image_label = Label(self.visualization_window)
+            self.image_label.pack()
+            
+            # Label para exibir o número do paciente e da foto
+            self.info_label = Label(self.visualization_window, text="")
+            self.info_label.pack()
+            
+            # Botões de navegação
+            prev_button = Button(self.visualization_window, text="Anterior", command=self.show_prev_image)
+            prev_button.pack(side='left')
+            next_button = Button(self.visualization_window, text="Próxima", command=self.show_next_image)
+            next_button.pack(side='right')
+            
+            # Exibir a primeira imagem
+            self.current_patient = 0
+            self.current_image = 0
+            self.show_current_image_in_visualization()
+        else:
+            messagebox.showwarning("Aviso", "Nenhum banco de imagens carregado. Por favor, carregue um banco de imagens primeiro.")
+
+    def show_current_image_in_visualization(self):
         # Carregar imagem do paciente e imagem atual
-        self.img = images[0][self.current_patient][self.current_image]
-        
-        # Exibir a imagem carregada
-        self.show_image()
+        self.img = self.images[0][self.current_patient][self.current_image]
+        if self.img is not None:
+            img_tk = ImageTk.PhotoImage(image=Image.fromarray(self.img))
+            self.image_label.config(image=img_tk)
+            self.image_label.image = img_tk
+            
+            # Atualizar o texto com o número do paciente e da foto
+            info_text = f"Paciente: {self.current_patient}/{self.total_patients - 1}, Imagem: {self.current_image}/{self.images_per_patient - 1}"
+            self.info_label.config(text=info_text)
+        else:
+            messagebox.showerror("Erro", "Não foi possível carregar a imagem.")
+
+    def show_next_image(self):
+        self.current_image = (self.current_image + 1) % self.images_per_patient
+        if self.current_image == 0:
+            self.current_patient = (self.current_patient + 1) % self.total_patients
+        self.show_current_image_in_visualization()
+
+    def show_prev_image(self):
+        if self.current_image == 0:
+            self.current_image = self.images_per_patient - 1
+            self.current_patient = (self.current_patient - 1) % self.total_patients
+        else:
+            self.current_image -=1
+        self.show_current_image_in_visualization()
+
+    def load_image(self):
+        if self.images is not None:
+            # Criar janela para escolher entre 'Aleatória' e 'Específica'
+            choice_window = Toplevel(self.root)
+            choice_window.title("Carregar Imagem")
+            choice_window.grab_set()  # Focar nesta janela
+
+            choice_var = StringVar(value="aleatoria")
+
+            Label(choice_window, text="Escolha uma opção:").pack(pady=10)
+
+            Radiobutton(choice_window, text="Aleatória", variable=choice_var, value="aleatoria").pack(anchor='w')
+            Radiobutton(choice_window, text="Específica", variable=choice_var, value="especifica").pack(anchor='w')
+
+            def confirm_choice():
+                choice = choice_var.get()
+                choice_window.destroy()
+                if choice == 'aleatoria':
+                    # Carregar imagem aleatória
+                    self.current_patient = np.random.randint(0, self.total_patients)
+                    self.current_image = np.random.randint(0, self.images_per_patient)
+                    self.img = self.images[0][self.current_patient][self.current_image]
+                    self.show_image()
+                elif choice == 'especifica':
+                    # Abrir janela para inserir números
+                    self.ask_patient_image_numbers()
+                else:
+                    messagebox.showwarning("Aviso", "Opção inválida.")
+
+            Button(choice_window, text="OK", command=confirm_choice).pack(pady=10)
+        else:
+            messagebox.showwarning("Aviso", "Nenhum banco de imagens carregado. Por favor, carregue um banco de imagens primeiro.")
+
+    def ask_patient_image_numbers(self):
+        # Janela para inserir o número do paciente e da imagem
+        input_window = Toplevel(self.root)
+        input_window.title("Especificar Imagem")
+        input_window.grab_set()  # Focar nesta janela
+
+        Label(input_window, text=f"Digite o número do paciente (0-{self.total_patients - 1}):").pack(pady=5)
+        patient_entry = Entry(input_window)
+        patient_entry.pack(pady=5)
+
+        Label(input_window, text=f"Digite o número da imagem (0-{self.images_per_patient - 1}):").pack(pady=5)
+        image_entry = Entry(input_window)
+        image_entry.pack(pady=5)
+
+        def load_specific_image():
+            try:
+                patient_num = int(patient_entry.get())
+                image_num = int(image_entry.get())
+                if 0 <= patient_num <= self.total_patients - 1 and 0 <= image_num <= self.images_per_patient - 1:
+                    self.current_patient = patient_num
+                    self.current_image = image_num
+                    self.img = self.images[0][self.current_patient][self.current_image]
+                    self.show_image()
+                    input_window.destroy()
+                else:
+                    messagebox.showerror("Erro", "Números fora do intervalo válido.")
+            except ValueError:
+                messagebox.showerror("Erro", "Por favor, insira números inteiros válidos.")
+
+        Button(input_window, text="Carregar Imagem", command=load_specific_image).pack(pady=10)
 
     def show_image(self):
         if self.img is not None:
             img_tk = ImageTk.PhotoImage(image=Image.fromarray(self.img))
             self.label.config(image=img_tk)
             self.label.image = img_tk
+        else:
+            messagebox.showerror("Erro", "Não foi possível carregar a imagem.")
 
     def select_roi(self):
-    # Se uma imagem foi carregada, permite a seleção de uma ROI
+        # Se uma imagem foi carregada, permite a seleção de uma ROI
         if self.img is not None:
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)  # Converter para BGR para exibição com OpenCV
             self.roi = cv2.selectROI("Selecione a ROI", img_bgr, fromCenter=False, showCrosshair=True)
@@ -109,6 +251,8 @@ class ImageViewer:
             if not hasattr(self, 'view_roi_button'):
                 self.view_roi_button = Button(self.root, text="Visualizar ROI", command=self.show_roi)
                 self.view_roi_button.pack()
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
 
     def show_roi(self):
         if self.roi_zoom is not None:
@@ -133,6 +277,8 @@ class ImageViewer:
             plt.ylabel("Densidade")
             plt.ylim(0, self.y_limit)  # Limite ajustável do eixo Y
             plt.show()
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma ROI foi selecionada. Por favor, selecione uma ROI primeiro.")
 
     def calculate_glcm_texture(self):
         if self.roi_zoom is not None:
@@ -162,7 +308,8 @@ class ImageViewer:
                                 f"Homogeneidade: {homogeneities[i]:.4f}\n\n")
 
             messagebox.showinfo("Descritores de Textura (GLCM)", result_text)
-
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma ROI foi selecionada. Por favor, selecione uma ROI primeiro.")
 
     def show_glcm_matrix(self, glcm, distance):
         plt.figure(figsize=(8, 6))
@@ -190,6 +337,8 @@ class ImageViewer:
                            f"Roughness: {roughness:.4f}")
 
             messagebox.showinfo("Descritores de Textura (SFM)", result_text)
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma ROI foi selecionada. Por favor, selecione uma ROI primeiro.")
 
     def calculate_coarseness(self, roi):
         # Exemplo de cálculo de coarseness
@@ -207,7 +356,6 @@ class ImageViewer:
         # Exemplo de cálculo de roughness
         return np.std(roi)
 
-
     def show_image_histogram(self):
         if self.img is not None:
             plt.figure()
@@ -218,6 +366,8 @@ class ImageViewer:
             plt.ylabel("Densidade")
             plt.ylim(0, self.y_limit)  # Limite ajustável do eixo Y
             plt.show()
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
 
     def adjust_bins(self):
         # Ajustar a escala do eixo X (bins) através de uma caixa de diálogo
@@ -241,6 +391,8 @@ class ImageViewer:
             # Exibir os resultados em uma nova janela de diálogo
             metrics_text = f"Média: {mean_val:.2f}\nMediana: {median_val:.2f}\nDesvio Padrão: {std_dev:.2f}"
             simpledialog.messagebox.showinfo("Métricas da Imagem", metrics_text)
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
 
     def generate_rois_automatic(self):
         # Geração automática das ROIs para o fígado e córtex renal
@@ -262,7 +414,7 @@ class ImageViewer:
             liver_roi_adjusted = liver_roi * hi
             liver_roi_adjusted = np.round(liver_roi_adjusted).astype(np.uint8)
 
-            # Salvar a ROI do fígado
+            # Salvar a ROI do fígado com o nome no formato 'ROI_nn_m'
             roi_filename = f"ROI_{self.current_patient:02d}_{self.current_image}.png"
             cv2.imwrite(roi_filename, liver_roi_adjusted)
             messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
@@ -276,6 +428,8 @@ class ImageViewer:
             plt.imshow(img_rgb)
             plt.title("ROIs Automáticas: Fígado (verde), Rim (azul)")
             plt.show()
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
 
     def generate_rois_manual(self):
         # Geração manual das ROIs para o fígado e córtex renal com tamanho fixo de 28x28 pixels
@@ -304,7 +458,7 @@ class ImageViewer:
             liver_roi_adjusted = liver_roi * hi
             liver_roi_adjusted = np.round(liver_roi_adjusted).astype(np.uint8)
 
-            # Salvar a ROI do fígado
+            # Salvar a ROI do fígado com o nome no formato 'ROI_nn_m'
             roi_filename = f"ROI_{self.current_patient:02d}_{self.current_image}.png"
             cv2.imwrite(roi_filename, liver_roi_adjusted)
             messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
@@ -318,6 +472,8 @@ class ImageViewer:
             plt.imshow(img_rgb)
             plt.title("ROIs Manuais: Fígado (verde), Rim (azul)")
             plt.show()
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
 
 # Criar janela principal
 root = Tk()
