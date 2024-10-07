@@ -48,10 +48,9 @@ class ImageViewer:
         self.roi_menu.add_command(label="Selecionar ROI", command=self.select_roi)
         self.roi_menu.add_command(label="Mostrar Histograma da ROI", command=self.show_histogram)
         self.roi_menu.add_command(label="Gerar ROIs Automáticas", command=self.generate_rois_automatic)
-
-        # Adiciona submenu para gerar ROIs manualmente
         self.roi_menu.add_command(label="Gerar ROIs Manualmente", command=self.generate_rois_manual)
         self.roi_menu.add_command(label="Calcular GLCM e Descritores de Textura", command=self.calculate_glcm_texture)
+        self.roi_menu.add_command(label="Calcular Descritor De Textura - SFM ", command=self.calculate_texture_sfm)
 
         # Adiciona opção para mostrar histograma da imagem completa
         self.file_menu.add_command(label="Mostrar Histograma da Imagem", command=self.show_image_histogram)
@@ -96,7 +95,7 @@ class ImageViewer:
             self.label.image = img_tk
 
     def select_roi(self):
-        # Se uma imagem foi carregada, permite a seleção de uma ROI
+    # Se uma imagem foi carregada, permite a seleção de uma ROI
         if self.img is not None:
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)  # Converter para BGR para exibição com OpenCV
             self.roi = cv2.selectROI("Selecione a ROI", img_bgr, fromCenter=False, showCrosshair=True)
@@ -105,20 +104,20 @@ class ImageViewer:
             # Cortar a ROI da imagem original
             x, y, w, h = self.roi
             self.roi_zoom = self.img[y:y+h, x:x+w]
-            self.show_roi()
 
-            # Exibir o slider de zoom após selecionar a ROI
-            if self.zoom_slider is None:
-                self.zoom_slider = Scale(self.root, from_=1, to=5, resolution=0.1, orient=HORIZONTAL, label="Zoom na ROI", command=self.update_zoom)
-                self.zoom_slider.pack()
+            # Criar botão "Visualizar ROI" após seleção
+            if not hasattr(self, 'view_roi_button'):
+                self.view_roi_button = Button(self.root, text="Visualizar ROI", command=self.show_roi)
+                self.view_roi_button.pack()
 
     def show_roi(self):
         if self.roi_zoom is not None:
-            # Redimensionar a ROI de acordo com o fator de zoom
-            roi_resized = cv2.resize(self.roi_zoom, (int(self.roi_zoom.shape[1] * self.zoom_factor), int(self.roi_zoom.shape[0] * self.zoom_factor)))
-            roi_tk = ImageTk.PhotoImage(image=Image.fromarray(roi_resized))
-            self.label.config(image=roi_tk)
-            self.label.image = roi_tk
+            # Exibir a ROI usando matplotlib
+            plt.figure(figsize=(5, 5))
+            plt.imshow(self.roi_zoom, cmap='gray')
+            plt.title("ROI Selecionada")
+            plt.axis('on')  # Exibir eixos, ou use 'off' para ocultá-los
+            plt.show()
 
     def update_zoom(self, value):
         self.zoom_factor = float(value)
@@ -137,29 +136,25 @@ class ImageViewer:
 
     def calculate_glcm_texture(self):
         if self.roi_zoom is not None:
-            # Normalizar os valores de cinza da ROI para 0-255 (se necessário)
             roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
-            # Distâncias para GLCM (1, 2, 4, 8 pixels)
             distances = [1, 2, 4, 8]
-            angles = [0]  # Usando ângulo 0 para simplificação
-
-            # Inicializar as variáveis para os descritores
+            angles = [0]
+            
             entropies = []
             homogeneities = []
 
-            # Calcular GLCM e os descritores para cada distância
             for d in distances:
                 glcm = graycomatrix(roi_norm, distances=[d], angles=angles, levels=256, symmetric=True, normed=True)
 
-                # Calcular entropia usando a matriz GLCM
+                # Exibir a matriz de coocorrência para a distância atual
+                self.show_glcm_matrix(glcm, d)
+
                 entropy_val = shannon_entropy(glcm)
                 entropies.append(entropy_val)
 
-                # Calcular homogeneidade
                 homogeneity_val = graycoprops(glcm, 'homogeneity')[0, 0]
                 homogeneities.append(homogeneity_val)
 
-            # Exibir os resultados
             result_text = "Descritores de Textura (GLCM):\n\n"
             for i, d in enumerate(distances):
                 result_text += (f"Distância {d} pixels:\n"
@@ -167,6 +162,51 @@ class ImageViewer:
                                 f"Homogeneidade: {homogeneities[i]:.4f}\n\n")
 
             messagebox.showinfo("Descritores de Textura (GLCM)", result_text)
+
+
+    def show_glcm_matrix(self, glcm, distance):
+        plt.figure(figsize=(8, 6))
+        plt.imshow(glcm[:, :, 0, 0], cmap='gray')
+        plt.colorbar()
+        plt.title(f'Matriz de Coocorrência - Distância {distance}')
+        plt.xlabel('Níveis de Cinza')
+        plt.ylabel('Níveis de Cinza')
+        plt.show()
+
+    def calculate_texture_sfm(self):
+        if self.roi_zoom is not None:
+            roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
+
+            # Descritores SFM
+            coarseness = self.calculate_coarseness(roi_norm)
+            contrast = self.calculate_contrast(roi_norm)
+            periodicity = self.calculate_periodicity(roi_norm)
+            roughness = self.calculate_roughness(roi_norm)
+
+            result_text = (f"Descritores de Textura (SFM):\n\n"
+                           f"Coarseness: {coarseness:.4f}\n"
+                           f"Contrast: {contrast:.4f}\n"
+                           f"Periodicity: {periodicity:.4f}\n"
+                           f"Roughness: {roughness:.4f}")
+
+            messagebox.showinfo("Descritores de Textura (SFM)", result_text)
+
+    def calculate_coarseness(self, roi):
+        # Exemplo de cálculo de coarseness
+        return np.var(roi)
+
+    def calculate_contrast(self, roi):
+        # Exemplo de cálculo de contrast
+        return np.mean(np.abs(np.diff(roi, axis=0))) + np.mean(np.abs(np.diff(roi, axis=1)))
+
+    def calculate_periodicity(self, roi):
+        # Exemplo de cálculo de periodicity
+        return np.mean(np.cos(roi))
+
+    def calculate_roughness(self, roi):
+        # Exemplo de cálculo de roughness
+        return np.std(roi)
+
 
     def show_image_histogram(self):
         if self.img is not None:
