@@ -6,6 +6,8 @@ import cv2
 import matplotlib.pyplot as plt
 from tkinter import Tk, Button, Label, Scale, HORIZONTAL, Menu, filedialog, simpledialog, messagebox
 from PIL import Image, ImageTk
+from skimage.feature import graycomatrix, graycoprops
+from skimage.measure import shannon_entropy
 
 # Definir nome do diretório
 path_input_dir = Path("../trabalhoPAI")
@@ -49,6 +51,7 @@ class ImageViewer:
 
         # Adiciona submenu para gerar ROIs manualmente
         self.roi_menu.add_command(label="Gerar ROIs Manualmente", command=self.generate_rois_manual)
+        self.roi_menu.add_command(label="Calcular GLCM e Descritores de Textura", command=self.calculate_glcm_texture)
 
         # Adiciona opção para mostrar histograma da imagem completa
         self.file_menu.add_command(label="Mostrar Histograma da Imagem", command=self.show_image_histogram)
@@ -131,6 +134,39 @@ class ImageViewer:
             plt.ylabel("Densidade")
             plt.ylim(0, self.y_limit)  # Limite ajustável do eixo Y
             plt.show()
+
+    def calculate_glcm_texture(self):
+        if self.roi_zoom is not None:
+            # Normalizar os valores de cinza da ROI para 0-255 (se necessário)
+            roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
+            # Distâncias para GLCM (1, 2, 4, 8 pixels)
+            distances = [1, 2, 4, 8]
+            angles = [0]  # Usando ângulo 0 para simplificação
+
+            # Inicializar as variáveis para os descritores
+            entropies = []
+            homogeneities = []
+
+            # Calcular GLCM e os descritores para cada distância
+            for d in distances:
+                glcm = graycomatrix(roi_norm, distances=[d], angles=angles, levels=256, symmetric=True, normed=True)
+
+                # Calcular entropia usando a matriz GLCM
+                entropy_val = shannon_entropy(glcm)
+                entropies.append(entropy_val)
+
+                # Calcular homogeneidade
+                homogeneity_val = graycoprops(glcm, 'homogeneity')[0, 0]
+                homogeneities.append(homogeneity_val)
+
+            # Exibir os resultados
+            result_text = "Descritores de Textura (GLCM):\n\n"
+            for i, d in enumerate(distances):
+                result_text += (f"Distância {d} pixels:\n"
+                                f"Entropia: {entropies[i]:.4f}\n"
+                                f"Homogeneidade: {homogeneities[i]:.4f}\n\n")
+
+            messagebox.showinfo("Descritores de Textura (GLCM)", result_text)
 
     def show_image_histogram(self):
         if self.img is not None:
