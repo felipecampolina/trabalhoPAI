@@ -48,7 +48,7 @@ class ImageViewer:
         self.roi_menu.add_command(label="Selecionar ROI", command=self.select_roi)
         self.roi_menu.add_command(label="Mostrar Histograma da ROI", command=self.show_histogram)
         self.roi_menu.add_command(label="Gerar ROIs Automáticas", command=self.generate_rois_automatic)
-        self.roi_menu.add_command(label="Gerar ROIs Manualmente", command=self.generate_rois_manual)
+        self.roi_menu.add_command(label="Gerar ROIs Manuais", command=self.generate_rois_manual)
         self.roi_menu.add_command(label="Calcular GLCM e Descritores de Textura", command=self.calculate_glcm_texture)
         self.roi_menu.add_command(label="Calcular Descritor De Textura - SFM ", command=self.calculate_texture_sfm)
 
@@ -434,20 +434,51 @@ class ImageViewer:
     def generate_rois_manual(self):
         # Geração manual das ROIs para o fígado e córtex renal com tamanho fixo de 28x28 pixels
         if self.img is not None:
-            # Selecionar manualmente a posição da ROI do fígado
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
-            roi_liver = cv2.selectROI("Selecione a posição da ROI do Fígado", img_bgr, fromCenter=False, showCrosshair=True)
-            cv2.destroyWindow("Selecione a posição da ROI do Fígado")
 
-            x_liver, y_liver = int(roi_liver[0]), int(roi_liver[1])
-            liver_roi = self.img[y_liver:y_liver+28, x_liver:x_liver+28]
+            # Selecionar manualmente a posição da ROI do fígado
+            liver_point = self.get_click_point(img_bgr, "Clique na posição da ROI do Fígado")
+            if liver_point is None:
+                messagebox.showwarning("Aviso", "Nenhum ponto foi selecionado para o fígado.")
+                return
+            x_liver, y_liver = liver_point
+
+            # Garantir que a ROI esteja dentro dos limites da imagem
+            x_liver_start = max(0, x_liver - 14)
+            y_liver_start = max(0, y_liver - 14)
+            x_liver_end = x_liver_start + 28
+            y_liver_end = y_liver_start + 28
+
+            # Ajustar se a ROI ultrapassar as dimensões da imagem
+            if x_liver_end > self.img.shape[1]:
+                x_liver_end = self.img.shape[1]
+                x_liver_start = x_liver_end - 28
+            if y_liver_end > self.img.shape[0]:
+                y_liver_end = self.img.shape[0]
+                y_liver_start = y_liver_end - 28
+
+            liver_roi = self.img[y_liver_start:y_liver_end, x_liver_start:x_liver_end]
 
             # Selecionar manualmente a posição da ROI do rim
-            roi_kidney = cv2.selectROI("Selecione a posição da ROI do Rim", img_bgr, fromCenter=False, showCrosshair=True)
-            cv2.destroyWindow("Selecione a posição da ROI do Rim")
+            kidney_point = self.get_click_point(img_bgr, "Clique na posição da ROI do Rim")
+            if kidney_point is None:
+                messagebox.showwarning("Aviso", "Nenhum ponto foi selecionado para o rim.")
+                return
+            x_kidney, y_kidney = kidney_point
 
-            x_kidney, y_kidney = int(roi_kidney[0]), int(roi_kidney[1])
-            kidney_roi = self.img[y_kidney:y_kidney+28, x_kidney:x_kidney+28]
+            x_kidney_start = max(0, x_kidney - 14)
+            y_kidney_start = max(0, y_kidney - 14)
+            x_kidney_end = x_kidney_start + 28
+            y_kidney_end = y_kidney_start + 28
+
+            if x_kidney_end > self.img.shape[1]:
+                x_kidney_end = self.img.shape[1]
+                x_kidney_start = x_kidney_end - 28
+            if y_kidney_end > self.img.shape[0]:
+                y_kidney_end = self.img.shape[0]
+                y_kidney_start = y_kidney_end - 28
+
+            kidney_roi = self.img[y_kidney_start:y_kidney_end, x_kidney_start:x_kidney_end]
 
             # Calcular o índice hepatorenal (HI)
             mean_liver = np.mean(liver_roi)
@@ -464,9 +495,9 @@ class ImageViewer:
             messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
 
             # Exibir as ROIs
-            img_copy = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
-            cv2.rectangle(img_copy, (x_liver, y_liver), (x_liver+28, y_liver+28), (0, 255, 0), 2)  # Verde para o fígado
-            cv2.rectangle(img_copy, (x_kidney, y_kidney), (x_kidney+28, y_kidney+28), (255, 0, 0), 2)  # Azul para o rim
+            img_copy = img_bgr.copy()
+            cv2.rectangle(img_copy, (x_liver_start, y_liver_start), (x_liver_end, y_liver_end), (0, 255, 0), 2)  # Verde para o fígado
+            cv2.rectangle(img_copy, (x_kidney_start, y_kidney_start), (x_kidney_end, y_kidney_end), (255, 0, 0), 2)  # Azul para o rim
 
             img_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
             plt.imshow(img_rgb)
@@ -474,6 +505,24 @@ class ImageViewer:
             plt.show()
         else:
             messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
+
+    def get_click_point(self, img, window_title):
+        click_point = []
+
+        def mouse_callback(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONDOWN:
+                click_point.append((x, y))
+                cv2.setMouseCallback(window_title, lambda *args: None)
+                cv2.destroyWindow(window_title)
+
+        cv2.imshow(window_title, img)
+        cv2.setMouseCallback(window_title, mouse_callback)
+        cv2.waitKey(0)
+
+        if click_point:
+            return click_point[0]
+        else:
+            return None
 
 # Criar janela principal
 root = Tk()
