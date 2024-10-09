@@ -284,41 +284,47 @@ class ImageViewer:
         if self.roi_zoom is not None:
             roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
             distances = [1, 2, 4, 8]
-            angles = [0]
+            num_angles = 16
+            angles = np.linspace(0, 2 * np.pi, num_angles, endpoint=False)
             
             entropies = []
             homogeneities = []
 
             for d in distances:
                 glcm = graycomatrix(roi_norm, distances=[d], angles=angles, levels=256, symmetric=True, normed=True)
+                glcm_radial = np.sum(glcm, axis=3)
+                glcm_radial = glcm_radial / np.sum(glcm_radial)
 
-                # Exibir a matriz de coocorrência para a distância atual
-                self.show_glcm_matrix(glcm, d)
+                # Exibir a matriz de coocorrência radial para a distância atual
+                self.show_glcm_matrix(glcm_radial, d)
 
-                entropy_val = shannon_entropy(glcm)
+                glcm_nonzero = glcm_radial[glcm_radial > 0]  # Filtra apenas os valores > 0
+                entropy_val = -np.sum(glcm_nonzero * np.log2(glcm_nonzero))
                 entropies.append(entropy_val)
-
-                homogeneity_val = graycoprops(glcm, 'homogeneity')[0, 0]
+                # Cálculo da Homogeneidade
+                homogeneity_val = np.sum(glcm_radial / (1 + np.abs(np.arange(256)[:, None] - np.arange(256))))
                 homogeneities.append(homogeneity_val)
 
-            result_text = "Descritores de Textura (GLCM):\n\n"
+            result_text = "Descritores de Textura (GLCM) Radial:\n\n"
             for i, d in enumerate(distances):
                 result_text += (f"Distância {d} pixels:\n"
-                                f"Entropia: {entropies[i]:.4f}\n"
+                                f"Entropia de Haralick: {entropies[i]:.4f}\n"
                                 f"Homogeneidade: {homogeneities[i]:.4f}\n\n")
 
-            messagebox.showinfo("Descritores de Textura (GLCM)", result_text)
+            messagebox.showinfo("Descritores de Textura (GLCM) Radial", result_text)
         else:
             messagebox.showwarning("Aviso", "Nenhuma ROI foi selecionada. Por favor, selecione uma ROI primeiro.")
 
+
     def show_glcm_matrix(self, glcm, distance):
         plt.figure(figsize=(8, 6))
-        plt.imshow(glcm[:, :, 0, 0], cmap='gray')
+        plt.imshow(glcm[:, :, 0], cmap='gray')  # Ajustado para 3 dimensões
         plt.colorbar()
         plt.title(f'Matriz de Coocorrência - Distância {distance}')
         plt.xlabel('Níveis de Cinza')
         plt.ylabel('Níveis de Cinza')
         plt.show()
+
 
     def calculate_texture_sfm(self):
         if self.roi_zoom is not None:
