@@ -47,8 +47,8 @@ class ImageViewer:
         # Opções dentro do submenu de ROI
         self.roi_menu.add_command(label="Selecionar ROI", command=self.select_roi)
         self.roi_menu.add_command(label="Mostrar Histograma da ROI", command=self.show_histogram)
-        self.roi_menu.add_command(label="Gerar ROIs Automáticas", command=self.generate_rois_automatic)
         self.roi_menu.add_command(label="Gerar ROIs Manuais", command=self.generate_rois_manual)
+        self.roi_menu.add_command(label="Gerar ROIs Manuais para Todo o Dataset", command=self.generate_rois_manual_dataset)
         self.roi_menu.add_command(label="Calcular GLCM e Descritores de Textura", command=self.calculate_glcm_texture)
         self.roi_menu.add_command(label="Calcular Descritor De Textura - SFM ", command=self.calculate_texture_sfm)
 
@@ -339,7 +339,7 @@ class ImageViewer:
             result_text = (f"Descritores de Textura (SFM):\n\n"
                            f"Coarseness: {coarseness:.4f}\n"
                            f"Contrast: {contrast:.4f}\n"
-                           f"Periodicity: {periodicity:.4f}\n"
+                           f"Periodicity: {periodicity:.4f}\n" 
                            f"Roughness: {roughness:.4f}")
 
             messagebox.showinfo("Descritores de Textura (SFM)", result_text)
@@ -399,44 +399,6 @@ class ImageViewer:
             simpledialog.messagebox.showinfo("Métricas da Imagem", metrics_text)
         else:
             messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
-
-    def generate_rois_automatic(self):
-        # Geração automática das ROIs para o fígado e córtex renal
-        if self.img is not None:
-            # Coordenadas ajustadas para o fígado
-            x_liver, y_liver = 220, 120
-            liver_roi = self.img[y_liver:y_liver+28, x_liver:x_liver+28]
-
-            # Coordenadas ajustadas para o córtex renal
-            x_kidney, y_kidney = 250, 200
-            kidney_roi = self.img[y_kidney:y_kidney+28, x_kidney:x_kidney+28]
-
-            # Calcular o índice hepatorenal (HI)
-            mean_liver = np.mean(liver_roi)
-            mean_kidney = np.mean(kidney_roi)
-            hi = mean_liver / mean_kidney if mean_kidney != 0 else 1
-
-            # Normalizar a ROI do fígado
-            liver_roi_adjusted = liver_roi * hi
-            liver_roi_adjusted = np.round(liver_roi_adjusted).astype(np.uint8)
-
-            # Salvar a ROI do fígado com o nome no formato 'ROI_nn_m'
-            roi_filename = f"ROI_{self.current_patient:02d}_{self.current_image}.png"
-            cv2.imwrite(roi_filename, liver_roi_adjusted)
-            messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
-
-            # Exibir as ROIs
-            img_copy = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
-            cv2.rectangle(img_copy, (x_liver, y_liver), (x_liver+28, y_liver+28), (0, 255, 0), 2)  # Verde para o fígado
-            cv2.rectangle(img_copy, (x_kidney, y_kidney), (x_kidney+28, y_kidney+28), (255, 0, 0), 2)  # Azul para o rim
-
-            img_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
-            plt.imshow(img_rgb)
-            plt.title("ROIs Automáticas: Fígado (verde), Rim (azul)")
-            plt.show()
-        else:
-            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
-
     def generate_rois_manual(self):
         # Geração manual das ROIs para o fígado e córtex renal com tamanho fixo de 28x28 pixels
         if self.img is not None:
@@ -509,6 +471,147 @@ class ImageViewer:
             plt.imshow(img_rgb)
             plt.title("ROIs Manuais: Fígado (verde), Rim (azul)")
             plt.show()
+        else:
+            messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
+
+    def generate_rois_manual_dataset(self):
+        if self.images is not None:
+            self.ask_starting_patient_image_numbers()
+        else:
+            messagebox.showwarning("Aviso", "Nenhum banco de imagens carregado. Por favor, carregue um banco de imagens primeiro.")
+
+    def ask_starting_patient_image_numbers(self):
+        # Janela para inserir o número do paciente e da imagem
+        input_window = Toplevel(self.root)
+        input_window.title("Especificar Ponto de Início")
+        input_window.grab_set()  # Focar nesta janela
+
+        Label(input_window, text=f"Digite o número do paciente inicial (0-{self.total_patients - 1}):").pack(pady=5)
+        patient_entry = Entry(input_window)
+        patient_entry.pack(pady=5)
+
+        Label(input_window, text=f"Digite o número da imagem inicial (0-{self.images_per_patient - 1}):").pack(pady=5)
+        image_entry = Entry(input_window)
+        image_entry.pack(pady=5)
+
+        def confirm_starting_point():
+            try:
+                patient_num = int(patient_entry.get())
+                image_num = int(image_entry.get())
+                if 0 <= patient_num <= self.total_patients - 1 and 0 <= image_num <= self.images_per_patient - 1:
+                    self.current_patient = patient_num
+                    self.current_image = image_num
+                    input_window.destroy()
+                    # Iniciar processamento
+                    self.process_next_image_manual_roi()
+                else:
+                    messagebox.showerror("Erro", "Números fora do intervalo válido.")
+            except ValueError:
+                messagebox.showerror("Erro", "Por favor, insira números inteiros válidos.")
+
+        Button(input_window, text="Iniciar", command=confirm_starting_point).pack(pady=10)
+
+    def process_next_image_manual_roi(self):
+        # Verificar se chegamos ao final do conjunto de dados
+        if self.current_patient >= self.total_patients:
+            messagebox.showinfo("Concluído", "Processamento de todas as imagens concluído.")
+            return
+        if self.current_image >= self.images_per_patient:
+            # Mover para o próximo paciente
+            self.current_patient += 1
+            self.current_image = 0
+            if self.current_patient >= self.total_patients:
+                messagebox.showinfo("Concluído", "Processamento de todas as imagens concluído.")
+                return
+        # Carregar a imagem
+        self.img = self.images[0][self.current_patient][self.current_image]
+        self.show_image()
+        # Proceder para gerar ROIs manuais para esta imagem
+        self.generate_rois_manual_for_image()
+
+    def generate_rois_manual_for_image(self):
+        # Geração manual das ROIs para o fígado e córtex renal com tamanho fixo de 28x28 pixels
+        if self.img is not None:
+            img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
+
+            # Selecionar manualmente a posição da ROI do fígado
+            liver_point = self.get_click_point(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posição da ROI do Fígado")
+            if liver_point is None:
+                messagebox.showwarning("Aviso", "Nenhum ponto foi selecionado para o fígado.")
+                # Pular para a próxima imagem
+                self.current_image += 1
+                self.process_next_image_manual_roi()
+                return
+            x_liver, y_liver = liver_point
+
+            # Garantir que a ROI esteja dentro dos limites da imagem
+            x_liver_start = max(0, x_liver - 14)
+            y_liver_start = max(0, y_liver - 14)
+            x_liver_end = x_liver_start + 28
+            y_liver_end = y_liver_start + 28
+
+            # Ajustar se a ROI ultrapassar as dimensões da imagem
+            if x_liver_end > self.img.shape[1]:
+                x_liver_end = self.img.shape[1]
+                x_liver_start = x_liver_end - 28
+            if y_liver_end > self.img.shape[0]:
+                y_liver_end = self.img.shape[0]
+                y_liver_start = y_liver_end - 28
+
+            liver_roi = self.img[y_liver_start:y_liver_end, x_liver_start:x_liver_end]
+
+            # Selecionar manualmente a posição da ROI do rim
+            kidney_point = self.get_click_point(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posição da ROI do Rim")
+            if kidney_point is None:
+                messagebox.showwarning("Aviso", "Nenhum ponto foi selecionado para o rim.")
+                # Pular para a próxima imagem
+                self.current_image += 1
+                self.process_next_image_manual_roi()
+                return
+            x_kidney, y_kidney = kidney_point
+
+            x_kidney_start = max(0, x_kidney - 14)
+            y_kidney_start = max(0, y_kidney - 14)
+            x_kidney_end = x_kidney_start + 28
+            y_kidney_end = y_kidney_start + 28
+
+            if x_kidney_end > self.img.shape[1]:
+                x_kidney_end = self.img.shape[1]
+                x_kidney_start = x_kidney_end - 28
+            if y_kidney_end > self.img.shape[0]:
+                y_kidney_end = self.img.shape[0]
+                y_kidney_start = y_kidney_end - 28
+
+            kidney_roi = self.img[y_kidney_start:y_kidney_end, x_kidney_start:x_kidney_end]
+
+            # Calcular o índice hepatorenal (HI)
+            mean_liver = np.mean(liver_roi)
+            mean_kidney = np.mean(kidney_roi)
+            hi = mean_liver / mean_kidney if mean_kidney != 0 else 1
+
+            # Normalizar a ROI do fígado
+            liver_roi_adjusted = liver_roi * hi
+            liver_roi_adjusted = np.round(liver_roi_adjusted).astype(np.uint8)
+
+            # Salvar a ROI do fígado com o nome no formato 'ROI_nn_m'
+            roi_filename = f"ROI_{self.current_patient:02d}_{self.current_image}.png"
+            cv2.imwrite(roi_filename, liver_roi_adjusted)
+            # Opcionalmente, você pode exibir uma mensagem de sucesso
+            messagebox.showinfo("Sucesso", f"ROI do fígado salva como {roi_filename}")
+
+            # Exibir as ROIs
+            img_copy = img_bgr.copy()
+            cv2.rectangle(img_copy, (x_liver_start, y_liver_start), (x_liver_end, y_liver_end), (0, 255, 0), 2)  # Verde para o fígado
+            cv2.rectangle(img_copy, (x_kidney_start, y_kidney_start), (x_kidney_end, y_kidney_end), (255, 0, 0), 2)  # Azul para o rim
+
+            img_rgb = cv2.cvtColor(img_copy, cv2.COLOR_BGR2RGB)
+            plt.imshow(img_rgb)
+            plt.title(f"ROIs Manuais: Fígado (verde), Rim (azul) - Paciente {self.current_patient}, Imagem {self.current_image}")
+            plt.show()
+
+            # Após o processamento, avançar para a próxima imagem
+            self.current_image += 1
+            self.process_next_image_manual_roi()
         else:
             messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
 
