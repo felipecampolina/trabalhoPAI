@@ -1,13 +1,13 @@
 import os
-from pathlib import Path
-import scipy.io
+import csv
+import re
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-from tkinter import Tk, Button, Label, Scale, HORIZONTAL, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, IntVar, Radiobutton, Entry
+from tkinter import Tk, Button, Label, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, Radiobutton, Entry
 from PIL import Image, ImageTk
 from skimage.feature import graycomatrix, graycoprops
-from skimage.measure import shannon_entropy
+import scipy.io
 
 # Interface gráfica usando Tkinter
 class ImageViewer:
@@ -50,7 +50,7 @@ class ImageViewer:
         self.roi_menu.add_command(label="Gerar ROIs Manuais", command=self.generate_rois_manual)
         self.roi_menu.add_command(label="Gerar ROIs Manuais para Todo o Dataset", command=self.generate_rois_manual_dataset)
         self.roi_menu.add_command(label="Calcular GLCM e Descritores de Textura", command=self.calculate_glcm_texture)
-        self.roi_menu.add_command(label="Calcular Descritor De Textura - SFM ", command=self.calculate_texture_sfm)
+        self.roi_menu.add_command(label="Calcular Descritor de Textura - SFM", command=self.calculate_texture_sfm)
 
         # Adiciona opção para mostrar histograma da imagem completa
         self.file_menu.add_command(label="Mostrar Histograma da Imagem", command=self.show_image_histogram)
@@ -80,6 +80,14 @@ class ImageViewer:
         self.intensity_scale = 1
         self.zoom_factor = 1  # Controle de zoom inicial
         
+        # Variáveis para o CSV
+        self.csv_file = None
+        self.csv_writer = None
+        self.csv_file_path = "data.csv"  # Nome fixo para o arquivo CSV
+
+        # Variável para controlar a interrupção do processo
+        self.stop_processing = False
+
     def load_image_bank(self):
         # Abrir diálogo para selecionar arquivo .mat
         mat_file_path = filedialog.askopenfilename(title="Selecione o arquivo .mat", filetypes=[("MAT files", "*.mat")])
@@ -282,39 +290,40 @@ class ImageViewer:
 
     def calculate_glcm_texture(self):
         if self.roi_zoom is not None:
-            roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
-            distances = [1, 2, 4, 8]
-            num_angles = 16
-            angles = np.linspace(0, 2 * np.pi, num_angles, endpoint=False)
-            
-            entropies = []
-            homogeneities = []
-
-            for d in distances:
-                glcm = graycomatrix(roi_norm, distances=[d], angles=angles, levels=256, symmetric=True, normed=True)
-                glcm_radial = np.sum(glcm, axis=3)
-                glcm_radial = glcm_radial / np.sum(glcm_radial)
-
-                # Exibir a matriz de coocorrência radial para a distância atual
-                self.show_glcm_matrix(glcm_radial, d)
-
-                glcm_nonzero = glcm_radial[glcm_radial > 0]  # Filtra apenas os valores > 0
-                entropy_val = -np.sum(glcm_nonzero * np.log2(glcm_nonzero))
-                entropies.append(entropy_val)
-                # Cálculo da Homogeneidade
-                homogeneity_val = np.sum(glcm_radial / (1 + np.abs(np.arange(256)[:, None] - np.arange(256))))
-                homogeneities.append(homogeneity_val)
-
+            # Utiliza a ROI selecionada para calcular os descritores
+            entropies, homogeneities = self.calculate_glcm_descriptors(self.roi_zoom)
             result_text = "Descritores de Textura (GLCM) Radial:\n\n"
+            distances = [1, 2, 4, 8]
             for i, d in enumerate(distances):
                 result_text += (f"Distância {d} pixels:\n"
-                                f"Entropia de Haralick: {entropies[i]:.4f}\n"
+                                f"Entropia: {entropies[i]:.4f}\n"
                                 f"Homogeneidade: {homogeneities[i]:.4f}\n\n")
-
-            messagebox.showinfo("Descritores de Textura (GLCM) Radial", result_text)
+            messagebox.showinfo("Descritores de Textura (GLCM)", result_text)
         else:
             messagebox.showwarning("Aviso", "Nenhuma ROI foi selecionada. Por favor, selecione uma ROI primeiro.")
 
+    def calculate_glcm_descriptors(self, roi):
+        roi_norm = (roi / np.max(roi) * 255).astype(np.uint8)
+        distances = [1, 2, 4, 8]
+        num_angles = 16
+        angles = np.linspace(0, 2 * np.pi, num_angles, endpoint=False)
+        
+        entropies = []
+        homogeneities = []
+
+        for d in distances:
+            glcm = graycomatrix(roi_norm, distances=[d], angles=angles, levels=256, symmetric=True, normed=True)
+            glcm_radial = np.sum(glcm, axis=3)
+            glcm_radial = glcm_radial / np.sum(glcm_radial)
+
+            glcm_nonzero = glcm_radial[glcm_radial > 0]
+            entropy_val = -np.sum(glcm_nonzero * np.log2(glcm_nonzero))
+            entropies.append(entropy_val)
+
+            homogeneity_val = np.sum(glcm_radial / (1 + np.abs(np.arange(256)[:, None] - np.arange(256))))
+            homogeneities.append(homogeneity_val)
+
+        return entropies, homogeneities
 
     def show_glcm_matrix(self, glcm, distance):
         plt.figure(figsize=(8, 6))
@@ -325,23 +334,19 @@ class ImageViewer:
         plt.ylabel('Níveis de Cinza')
         plt.show()
 
-
     def calculate_texture_sfm(self):
         if self.roi_zoom is not None:
-            roi_norm = (self.roi_zoom / np.max(self.roi_zoom) * 255).astype(np.uint8)
-
-            # Descritores SFM
-            coarseness = self.calculate_coarseness(roi_norm)
-            contrast = self.calculate_contrast(roi_norm)
-            periodicity = self.calculate_periodicity(roi_norm)
-            roughness = self.calculate_roughness(roi_norm)
+            # Utiliza a ROI selecionada para calcular os descritores
+            coarseness = self.calculate_coarseness(self.roi_zoom)
+            contrast = self.calculate_contrast(self.roi_zoom)
+            periodicity = self.calculate_periodicity(self.roi_zoom)
+            roughness = self.calculate_roughness(self.roi_zoom)
 
             result_text = (f"Descritores de Textura (SFM):\n\n"
                            f"Coarseness: {coarseness:.4f}\n"
                            f"Contrast: {contrast:.4f}\n"
-                           f"Periodicity: {periodicity:.4f}\n" 
+                           f"Periodicity: {periodicity:.4f}\n"
                            f"Roughness: {roughness:.4f}")
-
             messagebox.showinfo("Descritores de Textura (SFM)", result_text)
         else:
             messagebox.showwarning("Aviso", "Nenhuma ROI foi selecionada. Por favor, selecione uma ROI primeiro.")
@@ -399,6 +404,7 @@ class ImageViewer:
             simpledialog.messagebox.showinfo("Métricas da Imagem", metrics_text)
         else:
             messagebox.showwarning("Aviso", "Nenhuma imagem foi carregada. Por favor, carregue uma imagem primeiro.")
+
     def generate_rois_manual(self):
         # Geração manual das ROIs para o fígado e córtex renal com tamanho fixo de 28x28 pixels
         if self.img is not None:
@@ -502,6 +508,17 @@ class ImageViewer:
                     self.current_patient = patient_num
                     self.current_image = image_num
                     input_window.destroy()
+                    # Abrir o arquivo CSV para escrita ou append
+                    file_exists = os.path.isfile(self.csv_file_path)
+                    if file_exists:
+                        self.csv_file = open(self.csv_file_path, 'a', newline='', encoding='utf-8')
+                        self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=['nome_arquivo', 'classe', 'figado_x', 'figado_y', 'rim_x', 'rim_y', 'HI',
+                                                                                   'entropia', 'homogeneidade', 'coarseness', 'contrast', 'periodicity', 'roughness'], delimiter=';')
+                    else:
+                        self.csv_file = open(self.csv_file_path, 'w', newline='', encoding='utf-8')
+                        self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=['nome_arquivo', 'classe', 'figado_x', 'figado_y', 'rim_x', 'rim_y', 'HI',
+                                                                                   'entropia', 'homogeneidade', 'coarseness', 'contrast', 'periodicity', 'roughness'], delimiter=';')
+                        self.csv_writer.writeheader()
                     # Iniciar processamento
                     self.process_next_image_manual_roi()
                 else:
@@ -512,9 +529,23 @@ class ImageViewer:
         Button(input_window, text="Iniciar", command=confirm_starting_point).pack(pady=10)
 
     def process_next_image_manual_roi(self):
+        # Verificar se o usuário optou por parar o processamento
+        if self.stop_processing:
+            messagebox.showinfo("Processo Interrompido", "O processamento foi interrompido pelo usuário.")
+            # Fechar o arquivo CSV
+            if self.csv_file:
+                self.csv_file.close()
+                self.csv_file = None
+            self.stop_processing = False  # Resetar para o próximo uso
+            return
+
         # Verificar se chegamos ao final do conjunto de dados
         if self.current_patient >= self.total_patients:
             messagebox.showinfo("Concluído", "Processamento de todas as imagens concluído.")
+            # Fechar o arquivo CSV
+            if self.csv_file:
+                self.csv_file.close()
+                self.csv_file = None
             return
         if self.current_image >= self.images_per_patient:
             # Mover para o próximo paciente
@@ -522,6 +553,10 @@ class ImageViewer:
             self.current_image = 0
             if self.current_patient >= self.total_patients:
                 messagebox.showinfo("Concluído", "Processamento de todas as imagens concluído.")
+                # Fechar o arquivo CSV
+                if self.csv_file:
+                    self.csv_file.close()
+                    self.csv_file = None
                 return
         # Carregar a imagem
         self.img = self.images[0][self.current_patient][self.current_image]
@@ -537,9 +572,8 @@ class ImageViewer:
             # Selecionar manualmente a posição da ROI do fígado
             liver_point = self.get_click_point(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posição da ROI do Fígado")
             if liver_point is None:
-                messagebox.showwarning("Aviso", "Nenhum ponto foi selecionado para o fígado.")
-                # Pular para a próxima imagem
-                self.current_image += 1
+                messagebox.showinfo("Processo Interrompido", "O processamento foi interrompido pelo usuário.")
+                self.stop_processing = True
                 self.process_next_image_manual_roi()
                 return
             x_liver, y_liver = liver_point
@@ -563,9 +597,8 @@ class ImageViewer:
             # Selecionar manualmente a posição da ROI do rim
             kidney_point = self.get_click_point(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posição da ROI do Rim")
             if kidney_point is None:
-                messagebox.showwarning("Aviso", "Nenhum ponto foi selecionado para o rim.")
-                # Pular para a próxima imagem
-                self.current_image += 1
+                messagebox.showinfo("Processo Interrompido", "O processamento foi interrompido pelo usuário.")
+                self.stop_processing = True
                 self.process_next_image_manual_roi()
                 return
             x_kidney, y_kidney = kidney_point
@@ -609,7 +642,47 @@ class ImageViewer:
             plt.title(f"ROIs Manuais: Fígado (verde), Rim (azul) - Paciente {self.current_patient}, Imagem {self.current_image}")
             plt.show()
 
-            # Após o processamento, avançar para a próxima imagem
+            # Cálculo dos descritores de textura usando as funções existentes
+            entropies, homogeneities = self.calculate_glcm_descriptors(liver_roi_adjusted)
+            coarseness = self.calculate_coarseness(liver_roi_adjusted)
+            contrast = self.calculate_contrast(liver_roi_adjusted)
+            periodicity = self.calculate_periodicity(liver_roi_adjusted)
+            roughness = self.calculate_roughness(liver_roi_adjusted)
+
+            # Determinar a classe do paciente
+            class_label = 'Saudavel' if self.current_patient <= 16 else 'Esteatose'
+
+            # Remover vírgulas e caracteres especiais dos dados
+            roi_filename_clean = re.sub(r'[^\w\-_\. ]', '_', roi_filename)
+            class_label_clean = re.sub(r'[^\w\-_\. ]', '_', class_label)
+
+            # Preparar os valores de entropia e homogeneidade (usando a distância 1 como exemplo)
+            entropy = entropies[0]
+            homogeneity = homogeneities[0]
+
+            # Armazenar os dados em um dicionário
+            data_row = {
+                'nome_arquivo': roi_filename_clean,
+                'classe': class_label_clean,
+                'figado_x': x_liver_start,
+                'figado_y': y_liver_start,
+                'rim_x': x_kidney_start,
+                'rim_y': y_kidney_start,
+                'HI': f"{hi:.4f}",
+                'entropia': f"{entropy:.4f}",
+                'homogeneidade': f"{homogeneity:.4f}",
+                'coarseness': f"{coarseness:.4f}",
+                'contrast': f"{contrast:.4f}",
+                'periodicity': f"{periodicity:.4f}",
+                'roughness': f"{roughness:.4f}"
+            }
+
+            # Escrever a linha no arquivo CSV
+            if self.csv_writer:
+                self.csv_writer.writerow(data_row)
+                self.csv_file.flush()  # Garantir que os dados sejam gravados imediatamente
+
+            # Avançar para a próxima imagem
             self.current_image += 1
             self.process_next_image_manual_roi()
         else:
@@ -621,14 +694,25 @@ class ImageViewer:
         def mouse_callback(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
                 click_point.append((x, y))
-                cv2.setMouseCallback(window_title, lambda *args: None)
                 cv2.destroyWindow(window_title)
 
-        cv2.imshow(window_title, img)
+        cv2.namedWindow(window_title)
         cv2.setMouseCallback(window_title, mouse_callback)
-        cv2.waitKey(0)
+        cv2.imshow(window_title, img)
 
-        if click_point:
+        while True:
+            key = cv2.waitKey(1) & 0xFF
+            if key == 27:  # Tecla Esc
+                self.stop_processing = True
+                cv2.destroyWindow(window_title)
+                break
+            if len(click_point) > 0:
+                break
+
+        if self.stop_processing:
+            self.stop_processing = False  # Resetar para futuras chamadas
+            return None
+        elif click_point:
             return click_point[0]
         else:
             return None
