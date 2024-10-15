@@ -8,6 +8,7 @@ from tkinter import Tk, Button, Label, Menu, filedialog, simpledialog, messagebo
 from PIL import Image, ImageTk
 from skimage.feature import graycomatrix, graycoprops
 import scipy.io
+import pyfeats as pf
 
 # Interface gráfica usando Tkinter
 class ImageViewer:
@@ -337,10 +338,11 @@ class ImageViewer:
     def calculate_texture_sfm(self):
         if self.roi_zoom is not None:
             # Utiliza a ROI selecionada para calcular os descritores
-            coarseness = self.calculate_coarseness(self.roi_zoom)
-            contrast = self.calculate_contrast(self.roi_zoom)
-            periodicity = self.calculate_periodicity(self.roi_zoom)
-            roughness = self.calculate_roughness(self.roi_zoom)
+            features, labels = pf.sfm_features(f=self.roi_zoom, mask=None, Lr=4, Lc=4)
+            coarseness = features[0]
+            contrast = features[1]
+            periodicity = features[2]
+            roughness = features[3]
 
             result_text = (f"Descritores de Textura (SFM):\n\n"
                            f"Coarseness: {coarseness:.4f}\n"
@@ -644,10 +646,11 @@ class ImageViewer:
 
             # Cálculo dos descritores de textura usando as funções existentes
             entropies, homogeneities = self.calculate_glcm_descriptors(liver_roi_adjusted)
-            coarseness = self.calculate_coarseness(liver_roi_adjusted)
-            contrast = self.calculate_contrast(liver_roi_adjusted)
-            periodicity = self.calculate_periodicity(liver_roi_adjusted)
-            roughness = self.calculate_roughness(liver_roi_adjusted)
+            features, labels = pf.sfm_features(f=liver_roi_adjusted, mask=None, Lr=4, Lc=4)
+            coarseness = features[0]
+            contrast = features[1]
+            periodicity = features[2]
+            roughness = features[3]
 
             # Determinar a classe do paciente
             class_label = 'Saudavel' if self.current_patient <= 16 else 'Esteatose'
