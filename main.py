@@ -1,3 +1,5 @@
+# Trabalho Prático - Diagnóstico de Esteatose Hepática em Exames de Ultrassom
+# Integrantes(Matricula): Felipe Campolina(762732), Leandro Guido(777801) e Marcelo Augusto(775119)
 import os
 import csv
 import re
@@ -47,7 +49,7 @@ class App(Frame):
         self.menu_roi.add_command(label="Calcular GLCM e descritores de textura", command=self.calcular_textura_glcm)
         self.menu_roi.add_command(label="Calcular descritor de textura - SFM", command=self.calcular_textura_sfm)
 
-        # opcao para mostrar histograma da imagem completa
+        # opcao para mostrar hitograma da imagem completa
         self.menu_opcoes.add_command(label="Mostrar Histograma da Imagem", command=self.mostrar_histograma_da_img)
 
         # submenu de configuracoes
@@ -79,12 +81,12 @@ class App(Frame):
         self.intensity_scale = 1
         self.zoom_factor = 1  # controle de zoom inicial
 
-        # variáveis para o CSV
+        # variaveis para o CSV
         self.csv_file = None
         self.csv_writer = None
         self.csv_file_path = "data.csv"  # nome fixo para o arquivo CSV
 
-        # variavel para controlar a interrupcao do processo
+        # variavel para controlar a interrupecao do processo
         self.parar_processo = False
 
         if CARREGAR_DATASET_AUTOMATICO:
@@ -130,7 +132,7 @@ class App(Frame):
             self.image_label = Label(janela_visualizar_imgs)
             self.image_label.pack()
 
-            # label para exibir o num do paciente e da foto
+            # label para exibir o num do pasciente e da foto
             self.info_label = Label(janela_visualizar_imgs, text="")
             self.info_label.pack()
 
@@ -177,7 +179,7 @@ class App(Frame):
 
     def carregar_imagem(self):
         if self.imagens is not None:
-            # criar janela para escolher entre aleatoria ou especifica
+            # criar janela para escolher entre aletoria ou especifica
             choice_window = Toplevel(self.root)
             choice_window.title("Carregar imagem")
             choice_window.grab_set() # focar nessa janela
@@ -210,7 +212,7 @@ class App(Frame):
     def perguntar_pela_imagem_e_paciente(self):
         input_window = Toplevel(self.root)
         input_window.title("Especificar imagem")
-        input_window.grab_set() #  focar nesta janela
+        input_window.grab_set() #  foca nesta janela
 
         Label(input_window, text=f"Digite o número do paciente (0-{self.total_patients - 1}):").pack(pady=5)
         patient_entry = Entry(input_window)
@@ -255,7 +257,7 @@ class App(Frame):
             x, y, w, h = self.roi
             self.roi_zoom = self.img[y:y+h, x:x+w]
 
-            # criar botão visualisar roi depois de selecionar
+            # criar botao visualisar roi depois de selecionar
             if not hasattr(self, 'view_roi_button'):
                 self.view_roi_button = Button(self.root, text="Visualizar ROI", command=self.mostrar_roi)
                 self.view_roi_button.pack()
@@ -322,7 +324,7 @@ class App(Frame):
             homogeneidade = np.sum(glcm_radial / (1 + np.abs(i_indices - j_indices)))
             homogeneidades.append(homogeneidade)
 
-            # Exibir a matriz GLCM se solicitado
+            # Exibir a matris GLCM se solicitado
             if exibir_matrizes:
                 self.mostrar_matriz_glcm(glcm_radial, d)
 
@@ -388,7 +390,7 @@ class App(Frame):
             messagebox.showwarning("AVISO", "Nenhuma imagem foi carregada. Carregue uma imagem primeiro.")
 
     def roi_28_x_28(self, pixel):
-        # retorna a roi ajustada para o tamanho 28 x 28 e os pixels limites da roi
+        # retorna a roi ajustada para o tamanho 28x28 e os pixels limites da roi
 
         x, y = pixel
 
@@ -398,7 +400,7 @@ class App(Frame):
         x_end = x_start + 28
         y_end = y_start + 28
 
-        # ajustar se a roi ultrapassar as dimensões da imagem
+        # ajustar se a roi ultrapassar as dimensoes da imagem
         if x_end > self.img.shape[1]:
             x_end = self.img.shape[1]
             x_start = x_end - 28
@@ -414,7 +416,7 @@ class App(Frame):
         if self.img is not None:
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
 
-            # selecionar manualmente a posição da roi do figado
+            # selecionar manuamente a posicao da roi do figado
             liver_pixel = self.get_pixel_do_clique(img_bgr, "Clique na posicao da ROI do Figado")
             if liver_pixel is None:
                 messagebox.showwarning("AVISO", "Nenhum ponto foi selecionado para o figado.")
@@ -430,7 +432,7 @@ class App(Frame):
 
             kidney_roi, x_kidney_start, y_kidney_start, x_kidney_end, y_kidney_end = self.roi_28_x_28(kidney_pixel)
 
-            # calcular o indice hepatorenal hi
+            # calcular o indice hepatorienal hi
             media_liver = np.mean(liver_roi)
             media_kidney = np.mean(kidney_roi)
             hi = media_liver / media_kidney if media_kidney != 0 else 1
@@ -447,7 +449,7 @@ class App(Frame):
             cv2.imwrite(nome_arquivo_roi, liver_roi_ajustado)
             messagebox.showinfo("SUCESSO", f"ROI do fígado salva como {nome_arquivo_roi}")
 
-            # exibir as rois
+            # exibir os rois
             img_copy = img_bgr.copy()
             cv2.rectangle(img_copy, (x_liver_start, y_liver_start), (x_liver_end, y_liver_end), (0, 255, 0), 2)  # verde para o fígado
             cv2.rectangle(img_copy, (x_kidney_start, y_kidney_start), (x_kidney_end, y_kidney_end), (255, 0, 0), 2)  # azul para o rim
@@ -461,7 +463,7 @@ class App(Frame):
 
     def gerar_rois_manual_dataset(self):
         if self.imagens is not None:
-            # perguntar o paciente e imagem inicial
+            # perguntar o pasciente e img inicial
             input_window = Toplevel(self.root)
             input_window.title("Especificar Ponto de Início")
             input_window.grab_set() #  focar nesta janela
@@ -479,7 +481,7 @@ class App(Frame):
                     num_paciente = int(paciente_selecionado.get())
                     num_imagem = int(imagem_selecionada.get())
 
-                    # se foi o paciente e imagem inicial forem validos
+                    # se foi o paciente e img inicial forem validos
                     if 0 <= num_paciente <= self.total_patients - 1 and 0 <= num_imagem <= self.imagens_per_patient - 1:
                         self.current_patient = num_paciente
                         self.current_image = num_imagem
@@ -555,7 +557,7 @@ class App(Frame):
             messagebox.showwarning("AVISO", "Nenhum banco de imagens carregado. Carregue um banco de imagens primeiro.")
 
     def gerar_rois_manuais(self):
-        # funcao recursiva para fazer a geração manual das rois para o figado e rim para todas as imagens do dataset
+        # funcao recursiva para fazer a geração manual das rois para o figado e rim para todas as imagens do datset
         # (a partir de um inicio dado)
         if self.img is not None:
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
@@ -571,7 +573,7 @@ class App(Frame):
 
             liver_roi, x_liver_start, y_liver_start, x_liver_end, y_liver_end = self.roi_28_x_28(liver_pixel)
 
-            # selecionar manualmente a posicao da roi do rim
+            # selecionar manualmente a posisao da roi do rim
             kidney_pixel = self.get_pixel_do_clique(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posicao da ROI do rim. Aperte ESC para sair")
             if kidney_pixel is None:
                 messagebox.showinfo("Processo Interrompido", "O processamento foi interrompido pelo usuário.")
@@ -596,7 +598,7 @@ class App(Frame):
             cv2.imwrite(nome_arquivo_roi, liver_roi_ajustado)
             messagebox.showinfo("SUCESSO", f"ROI do fígado salva como {nome_arquivo_roi}")
 
-            # exibir as rois
+            # exibir os rois
             img_copy = img_bgr.copy()
             cv2.rectangle(img_copy, (x_liver_start, y_liver_start), (x_liver_end, y_liver_end), (0, 255, 0), 2)  # verde para o fígado
             cv2.rectangle(img_copy, (x_kidney_start, y_kidney_start), (x_kidney_end, y_kidney_end), (255, 0, 0), 2)  # azul para o rim
@@ -616,14 +618,14 @@ class App(Frame):
             periodicity = features[2]
             roughness = features[3]
 
-            # determinar a classe do paciente
+            # determinar a clase do paciente
             class_label = 'Saudavel' if self.current_patient <= 16 else 'Esteatose'
 
-            # remover vírgulas e caracteres especiais dos dados
+            # remover virgulas e caracteres especiais dos dados
             nome_arquivo_roi_clean = re.sub(r'[^\w\-_\. ]', '_', nome_arquivo_roi)
             class_label_clean = re.sub(r'[^\w\-_\. ]', '_', class_label)
 
-            # preparar os valores de entropia e homogeneidade para todas as distâncias
+            # preparar os valores de entropia e homogeniedade para todas as distancias
             data_row = {
                 'nome_arquivo': nome_arquivo_roi_clean,
                 'classe': class_label_clean,
@@ -646,10 +648,10 @@ class App(Frame):
                 'homogeneidade_d8': f"{homogeneidades[3]:.4f}"
             }
 
-            # escrever a linha no arquivo csv
+            # escrever linha no arquivo csv
             if self.csv_writer:
                 self.csv_writer.writerow(data_row)
-                self.csv_file.flush()  # garante que os dados sejam gravados imediatamente
+                self.csv_file.flush()  # garante que os dados sejam gravados imdiatamente
 
             # avançar para a prox imagem
             self.current_image += 1
@@ -669,7 +671,7 @@ class App(Frame):
                         self.csv_file = None
                     return
 
-            # carregar próxima imagem
+            # carregar proxima img
             self.img = self.imagens[0][self.current_patient][self.current_image]
             self.mostrar_img()
             self.gerar_rois_manuais()
@@ -677,7 +679,7 @@ class App(Frame):
             messagebox.showwarning("AVISO", "Nenhuma imagem foi carregada. Carregue uma imagem primeiro.")
 
     def get_pixel_do_clique(self, img, window_title):
-        pixel_do_clique = [] # usando um array pra ter a referencia na função mouse_callback
+        pixel_do_clique = [] # usando um array pra ter a referencia na funcao mouse_callback
 
         def mouse_callback(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
@@ -692,7 +694,7 @@ class App(Frame):
             key = cv2.waitKey(1) & 0xFF
             if cv2.getWindowProperty(window_title, cv2.WND_PROP_VISIBLE) < 1: # tratamento caso fechou no X
                 break
-            if key == 27: # tecla ESC
+            if key == 27: # tecla esc
                 self.parar_processo = True
                 cv2.destroyWindow(window_title)
                 break
