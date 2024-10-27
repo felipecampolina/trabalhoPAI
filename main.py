@@ -283,46 +283,56 @@ class App(Frame):
             messagebox.showwarning("AVISO", "Nenhuma ROI de tamanho livre foi selecionada. Selecione uma ROI primeiro.")
 
     def calcular_textura_glcm(self):
-        if self.roi_zoom is not None: # se tem uma roi selecionada
-            entropias, homogeneidades = self.calcular_descritores_glcm(self.roi_zoom)
+        if self.roi_zoom is not None:  # se tem uma ROI selecionada
+            entropias, homogeneidades, glcm_matrices = self.calcular_descritores_glcm(self.roi_zoom, exibir_matrizes=True)
             s = "Descritores de textura (GLCM) radial:\n\n"
             distancias = [1, 2, 4, 8]
             for i, d in enumerate(distancias):
                 s += (f"Distância {d} pixels:\n"
-                                f"Entropia: {entropias[i]:.4f}\n"
-                                f"Homogeneidade: {homogeneidades[i]:.4f}\n\n")
+                    f"Entropia: {entropias[i]:.4f}\n"
+                    f"Homogeneidade: {homogeneidades[i]:.4f}\n\n")
             messagebox.showinfo("Descritores de textura (GLCM)", s)
         else:
-            messagebox.showwarning("AVISO", "Nenhuma ROI de tamanho livre foi selecionada. Selecione uma ROI primeiro.")
+            messagebox.showwarning("AVISO", "Nenhuma ROI foi selecionada. Selecione uma ROI primeiro.")
 
-    def calcular_descritores_glcm(self, roi):
+
+    def calcular_descritores_glcm(self, roi, exibir_matrizes=False):
         roi_norm = (roi / np.max(roi) * 255).astype(np.uint8)
         distancias = [1, 2, 4, 8]
         num_angulos = 16
         angulos = np.linspace(0, 2 * np.pi, num_angulos, endpoint=False)
-
+        
         entropias = []
         homogeneidades = []
+        glcm_matrices = []
 
-        for d in distancias:
+        for idx, d in enumerate(distancias):
             glcm = graycomatrix(roi_norm, distances=[d], angles=angulos, levels=256, symmetric=True, normed=True)
             glcm_radial = np.sum(glcm, axis=3)
             glcm_radial = glcm_radial / np.sum(glcm_radial)
+
+            glcm_matrices.append(glcm_radial)  # Armazenar a matriz GLCM
 
             glcm_nonzero = glcm_radial[glcm_radial > 0]
             entropia = -np.sum(glcm_nonzero * np.log2(glcm_nonzero))
             entropias.append(entropia)
 
-            homogeneidade = np.sum(glcm_radial / (1 + np.abs(np.arange(256)[:, None] - np.arange(256)))) #
+            i_indices = np.arange(256).reshape(-1, 1)
+            j_indices = np.arange(256).reshape(1, -1)
+            homogeneidade = np.sum(glcm_radial / (1 + np.abs(i_indices - j_indices)))
             homogeneidades.append(homogeneidade)
 
-        return entropias, homogeneidades
+            # Exibir a matriz GLCM se solicitado
+            if exibir_matrizes:
+                self.mostrar_matriz_glcm(glcm_radial, d)
 
-    def mostrar_matriz_glcm(self, glcm, distancia):
-        plt.figure(figsize=(8, 6))
-        plt.imshow(glcm[:, :, 0], cmap='gray')  # ajustado para 3 dimensoes
+        return entropias, homogeneidades, glcm_matrices
+
+    def mostrar_matriz_glcm(self, glcm_radial, distancia):
+        plt.figure(figsize=(6, 5))
+        plt.imshow(glcm_radial, cmap='gray')
         plt.colorbar()
-        plt.title(f'Matriz de coocorrência - Distância {distancia}')
+        plt.title(f'Matriz GLCM Radial - Distância {distancia}')
         plt.xlabel('Níveis de cinza')
         plt.ylabel('Níveis de cinza')
         plt.show()
@@ -596,10 +606,10 @@ class App(Frame):
             plt.title(f"ROIs Manuais: Fígado (verde), Rim (azul) - Paciente {self.current_patient}, Imagem {self.current_image}")
             plt.show()
 
-            # calculo dos descritores de textura usando as funcoes existentes
-            entropias, homogeneidades = self.calcular_descritores_glcm(liver_roi_ajustado)
-
-            # calculo sfm
+            # calculo dos descritores de textura 
+            entropias, homogeneidades, _ = self.calcular_descritores_glcm(liver_roi_ajustado, exibir_matrizes=False)
+            
+            # calculo sfn
             features, _ = pf.sfm_features(f=liver_roi_ajustado, mask=None, Lr=4, Lc=4)
             coarseness = features[0]
             contrast = features[1]
@@ -609,36 +619,32 @@ class App(Frame):
             # determinar a classe do paciente
             class_label = 'Saudavel' if self.current_patient <= 16 else 'Esteatose'
 
-            # remover virgulas e caracteres especiais dos dados
+            # remover vírgulas e caracteres especiais dos dados
             nome_arquivo_roi_clean = re.sub(r'[^\w\-_\. ]', '_', nome_arquivo_roi)
             class_label_clean = re.sub(r'[^\w\-_\. ]', '_', class_label)
 
-            # preparar os valores de entropia e homogeneidade (usando a distância 1 como exemplo)
-            entropy = entropias[0]
-            homogeneity = homogeneidades[0]
-
-            # armazenar os dados em um dicionário
+            # preparar os valores de entropia e homogeneidade para todas as distâncias
             data_row = {
-                        'nome_arquivo': nome_arquivo_roi_clean,
-                        'classe': class_label_clean,
-                        'figado_x': x_liver_start,
-                        'figado_y': y_liver_start,
-                        'rim_x': x_kidney_start,
-                        'rim_y': y_kidney_start,
-                        'HI': f"{hi:.4f}",
-                        'coarseness': f"{coarseness:.4f}",
-                        'contrast': f"{contrast:.4f}",
-                        'periodicity': f"{periodicity:.4f}",
-                        'roughness': f"{roughness:.4f}",
-                        'entropia_d1': f"{entropias[0]:.4f}",
-                        'entropia_d2': f"{entropias[1]:.4f}",
-                        'entropia_d4': f"{entropias[2]:.4f}",
-                        'entropia_d8': f"{entropias[3]:.4f}",
-                        'homogeneidade_d1': f"{homogeneidades[0]:.4f}",
-                        'homogeneidade_d2': f"{homogeneidades[1]:.4f}",
-                        'homogeneidade_d4': f"{homogeneidades[2]:.4f}",
-                        'homogeneidade_d8': f"{homogeneidades[3]:.4f}"
-                    }
+                'nome_arquivo': nome_arquivo_roi_clean,
+                'classe': class_label_clean,
+                'figado_x': x_liver_start,
+                'figado_y': y_liver_start,
+                'rim_x': x_kidney_start,
+                'rim_y': y_kidney_start,
+                'HI': f"{hi:.4f}",
+                'coarseness': f"{coarseness:.4f}",
+                'contrast': f"{contrast:.4f}",
+                'periodicity': f"{periodicity:.4f}",
+                'roughness': f"{roughness:.4f}",
+                'entropia_d1': f"{entropias[0]:.4f}",
+                'entropia_d2': f"{entropias[1]:.4f}",
+                'entropia_d4': f"{entropias[2]:.4f}",
+                'entropia_d8': f"{entropias[3]:.4f}",
+                'homogeneidade_d1': f"{homogeneidades[0]:.4f}",
+                'homogeneidade_d2': f"{homogeneidades[1]:.4f}",
+                'homogeneidade_d4': f"{homogeneidades[2]:.4f}",
+                'homogeneidade_d8': f"{homogeneidades[3]:.4f}"
+            }
 
             # escrever a linha no arquivo csv
             if self.csv_writer:
@@ -663,6 +669,9 @@ class App(Frame):
                         self.csv_file = None
                     return
 
+            # carregar próxima imagem
+            self.img = self.imagens[0][self.current_patient][self.current_image]
+            self.mostrar_img()
             self.gerar_rois_manuais()
         else:
             messagebox.showwarning("AVISO", "Nenhuma imagem foi carregada. Carregue uma imagem primeiro.")
