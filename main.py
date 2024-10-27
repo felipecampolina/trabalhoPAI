@@ -20,7 +20,7 @@ class App(Frame):
         self.root = root
         self.root.title("Visualizador de imagens em tons de cinza com ROIs")
         self.root.geometry("800x600")
-        
+
         # criando barra de menu
         self.menu_bar = Menu(root)
         root.config(menu=self.menu_bar)
@@ -35,15 +35,15 @@ class App(Frame):
         # menu principal (opcoes)
         self.menu_opcoes = Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Opções", menu=self.menu_opcoes)
-        self.menu_opcoes.add_command(label="Carregar para edição", command=self.carregar_imagem)
+        self.menu_opcoes.add_command(label="Carregar imagem para edição", command=self.carregar_imagem)
 
         # submenu para opcoes de ROI
         self.menu_roi = Menu(self.menu_opcoes, tearoff=0)
         self.menu_opcoes.add_cascade(label="Opções de ROI", menu=self.menu_roi)
-        self.menu_roi.add_command(label="Selecionar ROI", command=self.selecionar_roi)
+        self.menu_roi.add_command(label="Gerar ROI tamanho livre", command=self.selecionar_roi)
         self.menu_roi.add_command(label="Mostrar histograma da ROI", command=self.mostrar_histograma_roi)
-        self.menu_roi.add_command(label="Gerar ROIs manual", command=self.gerar_rois_manual)
-        self.menu_roi.add_command(label="Gerar ROIs manuais para todo o dataset", command=self.gerar_rois_manual_dataset)
+        self.menu_roi.add_command(label="Gerar ROIS 28x28(figado e rim)", command=self.gerar_rois_manual)
+        self.menu_roi.add_command(label="Gerar ROIs 28x28 para CSV com descritores", command=self.gerar_rois_manual_dataset)
         self.menu_roi.add_command(label="Calcular GLCM e descritores de textura", command=self.calcular_textura_glcm)
         self.menu_roi.add_command(label="Calcular descritor de textura - SFM", command=self.calcular_textura_sfm)
 
@@ -57,7 +57,7 @@ class App(Frame):
         self.settings_menu.add_command(label="Ajustar escala Y (Limite)", command=self.ajustar_y_limit)
         self.settings_menu.add_command(label="Exibir métricas da imagem", command=self.mostrar_metricas_img)
 
-    # --------------------------------------------------- VARIAVEIS
+        # --------------------------------------------------- VARIAVEIS
 
         # variaveis para configuracoes do histograma
         self.bins = 41       # padrão para o eixo X (bins)
@@ -78,7 +78,7 @@ class App(Frame):
         self.roi_zoom = None
         self.intensity_scale = 1
         self.zoom_factor = 1  # controle de zoom inicial
-        
+
         # variáveis para o CSV
         self.csv_file = None
         self.csv_writer = None
@@ -125,21 +125,21 @@ class App(Frame):
         if self.imagens is not None:
             janela_visualizar_imgs = Toplevel(self.root)
             janela_visualizar_imgs.title("Visualizar imagens")
-            
+
             # label para exibir a imagem
             self.image_label = Label(janela_visualizar_imgs)
             self.image_label.pack()
-            
+
             # label para exibir o num do paciente e da foto
             self.info_label = Label(janela_visualizar_imgs, text="")
             self.info_label.pack()
-            
+
             # botoes de navegacao
             prev_button = Button(janela_visualizar_imgs, text="Anterior", command=self.mostrar_imagem_ant)
             prev_button.pack(side='left')
             next_button = Button(janela_visualizar_imgs, text="Próxima", command=self.mostrar_prox_imagem)
             next_button.pack(side='right')
-            
+
             # exibir a primeira imagem
             self.current_patient = 0
             self.current_image = 0
@@ -148,13 +148,13 @@ class App(Frame):
             messagebox.showwarning("AVISO", "Nenhum banco de imagens carregado. Carregue um banco de imagens primeiro.")
 
     def mostrar_imagem_atual(self):
-         # carregar imagem do paciente e imagem atual
+        # carregar imagem do paciente e imagem atual
         self.img = self.imagens[0][self.current_patient][self.current_image]
         if self.img is not None:
             img_tk = ImageTk.PhotoImage(image=Image.fromarray(self.img))
             self.image_label.config(image=img_tk)
             self.image_label.image = img_tk
-            
+
             # atualizar o texto com o numero do paciente e da foto
             info_text = f"Paciente: {self.current_patient}/{self.total_patients - 1}, Imagem: {self.current_image}/{self.imagens_per_patient - 1}"
             self.info_label.config(text=info_text)
@@ -280,7 +280,7 @@ class App(Frame):
             plt.ylim(0, self.y_limit)
             plt.show()
         else:
-            messagebox.showwarning("AVISO", "Nenhuma ROI foi selecionada. Selecione uma ROI primeiro.")
+            messagebox.showwarning("AVISO", "Nenhuma ROI de tamanho livre foi selecionada. Selecione uma ROI primeiro.")
 
     def calcular_textura_glcm(self):
         if self.roi_zoom is not None: # se tem uma roi selecionada
@@ -293,14 +293,14 @@ class App(Frame):
                                 f"Homogeneidade: {homogeneidades[i]:.4f}\n\n")
             messagebox.showinfo("Descritores de textura (GLCM)", s)
         else:
-            messagebox.showwarning("AVISO", "Nenhuma ROI foi selecionada. Selecione uma ROI primeiro.")
+            messagebox.showwarning("AVISO", "Nenhuma ROI de tamanho livre foi selecionada. Selecione uma ROI primeiro.")
 
     def calcular_descritores_glcm(self, roi):
         roi_norm = (roi / np.max(roi) * 255).astype(np.uint8)
         distancias = [1, 2, 4, 8]
         num_angulos = 16
         angulos = np.linspace(0, 2 * np.pi, num_angulos, endpoint=False)
-        
+
         entropias = []
         homogeneidades = []
 
@@ -342,7 +342,7 @@ class App(Frame):
                            f"Roughness: {roughness:.4f}")
             messagebox.showinfo("Descritores de textura (SFM)", s)
         else:
-            messagebox.showwarning("AVISO", "Nenhuma ROI foi selecionada. Selecione uma ROI primeiro.")
+            messagebox.showwarning("AVISO", "Nenhuma ROI de tamanho livre foi selecionada. Selecione uma ROI primeiro.")
 
     def mostrar_histograma_da_img(self):
         if self.img is not None:
@@ -405,15 +405,15 @@ class App(Frame):
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
 
             # selecionar manualmente a posição da roi do figado
-            liver_pixel = self.get_pixel_do_clique(img_bgr, "Clique na posição da ROI do Fígado")
+            liver_pixel = self.get_pixel_do_clique(img_bgr, "Clique na posicao da ROI do Figado")
             if liver_pixel is None:
-                messagebox.showwarning("AVISO", "Nenhum ponto foi selecionado para o fígado.")
+                messagebox.showwarning("AVISO", "Nenhum ponto foi selecionado para o figado.")
                 return
 
             liver_roi, x_liver_start, y_liver_start, x_liver_end, y_liver_end = self.roi_28_x_28(liver_pixel)
 
             # selecionar manualmente a posicao da roi do rim
-            kidney_pixel = self.get_pixel_do_clique(img_bgr, "Clique na posição da ROI do Rim")
+            kidney_pixel = self.get_pixel_do_clique(img_bgr, "Clique na posicao da ROI do Rim")
             if kidney_pixel is None:
                 messagebox.showwarning("AVISO", "Nenhum ponto foi selecionado para o rim.")
                 return
@@ -424,6 +424,9 @@ class App(Frame):
             media_liver = np.mean(liver_roi)
             media_kidney = np.mean(kidney_roi)
             hi = media_liver / media_kidney if media_kidney != 0 else 1
+
+            # Exibir o valor do HI
+            messagebox.showinfo("Índice Hepatorrenal (HI)", f"O valor do HI é: {hi:.4f}")
 
             # normalizar a roi do figado
             liver_roi_ajustado = liver_roi * hi
@@ -475,13 +478,57 @@ class App(Frame):
                         # abre o arquivo csv para escrita ou append
                         file_exists = os.path.isfile(self.csv_file_path)
                         if file_exists:
-                            self.csv_file = open(self.csv_file_path, 'a', newline='', encoding='utf-8')
-                            self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=['nome_arquivo', 'classe', 'figado_x', 'figado_y', 'rim_x', 'rim_y', 'HI',
-                                                                                    'entropia', 'homogeneidade', 'coarseness', 'contrast', 'periodicity', 'roughness'], delimiter=';')
+                            self.csv_file = open(
+                                self.csv_file_path, "a", newline="", encoding="utf-8"
+                            )
+                            self.csv_writer = csv.DictWriter(
+                                self.csv_file,
+                                fieldnames=[
+                                    "nome_arquivo",
+                                    "classe",
+                                    "figado_x",
+                                    "figado_y",
+                                    "rim_x",
+                                    "rim_y",
+                                    "HI",
+                                    "coarseness",
+                                    "contrast",
+                                    "periodicity",
+                                    "roughness",
+                                    "entropia_d1",
+                                    "entropia_d2",
+                                    "entropia_d4",
+                                    "entropia_d8",
+                                    "homogeneidade_d1",
+                                    "homogeneidade_d2",
+                                    "homogeneidade_d4",
+                                    "homogeneidade_d8",
+                                ],
+                                delimiter=";",
+                            )
                         else:
-                            self.csv_file = open(self.csv_file_path, 'w', newline='', encoding='utf-8')
-                            self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=['nome_arquivo', 'classe', 'figado_x', 'figado_y', 'rim_x', 'rim_y', 'HI',
-                                                                                    'entropia', 'homogeneidade', 'coarseness', 'contrast', 'periodicity', 'roughness'], delimiter=';')
+                            self.csv_file = open(
+                                self.csv_file_path, "w", newline="", encoding="utf-8"
+                            )
+                            self.csv_writer = csv.DictWriter(
+                                self.csv_file,
+                                fieldnames=[
+                                    "nome_arquivo",
+                                    "classe",
+                                    "figado_x",
+                                    "figado_y",
+                                    "rim_x",
+                                    "rim_y",
+                                    "HI",
+                                    "entropia",
+                                    "homogeneidade",
+                                    "coarseness",
+                                    "contrast",
+                                    "periodicity",
+                                    "roughness",
+                                ],
+                                delimiter=";",
+                            )
                             self.csv_writer.writeheader()
 
                         # seleciona primeira imagem
@@ -504,7 +551,7 @@ class App(Frame):
             img_bgr = cv2.cvtColor(self.img, cv2.COLOR_GRAY2BGR)
 
             # selecionar manualmente a posicao da roi do figado
-            liver_pixel = self.get_pixel_do_clique(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posicao da ROI do figado")
+            liver_pixel = self.get_pixel_do_clique(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posicao da ROI do figado. Aperte ESC para sair")
             if liver_pixel is None:
                 messagebox.showinfo("Processo Interrompido", "O processamento foi interrompido pelo usuário.")
                 if self.csv_file:
@@ -515,7 +562,7 @@ class App(Frame):
             liver_roi, x_liver_start, y_liver_start, x_liver_end, y_liver_end = self.roi_28_x_28(liver_pixel)
 
             # selecionar manualmente a posicao da roi do rim
-            kidney_pixel = self.get_pixel_do_clique(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posicao da ROI do rim")
+            kidney_pixel = self.get_pixel_do_clique(img_bgr, f"Paciente {self.current_patient}, Imagem {self.current_image}: Clique na posicao da ROI do rim. Aperte ESC para sair")
             if kidney_pixel is None:
                 messagebox.showinfo("Processo Interrompido", "O processamento foi interrompido pelo usuário.")
                 if self.csv_file:
@@ -551,7 +598,7 @@ class App(Frame):
 
             # calculo dos descritores de textura usando as funcoes existentes
             entropias, homogeneidades = self.calcular_descritores_glcm(liver_roi_ajustado)
-            
+
             # calculo sfm
             features, _ = pf.sfm_features(f=liver_roi_ajustado, mask=None, Lr=4, Lc=4)
             coarseness = features[0]
@@ -572,20 +619,26 @@ class App(Frame):
 
             # armazenar os dados em um dicionário
             data_row = {
-                'nome_arquivo': nome_arquivo_roi_clean,
-                'classe': class_label_clean,
-                'figado_x': x_liver_start,
-                'figado_y': y_liver_start,
-                'rim_x': x_kidney_start,
-                'rim_y': y_kidney_start,
-                'HI': f"{hi:.4f}",
-                'entropia': f"{entropy:.4f}",
-                'homogeneidade': f"{homogeneity:.4f}",
-                'coarseness': f"{coarseness:.4f}",
-                'contrast': f"{contrast:.4f}",
-                'periodicity': f"{periodicity:.4f}",
-                'roughness': f"{roughness:.4f}"
-            }
+                        'nome_arquivo': nome_arquivo_roi_clean,
+                        'classe': class_label_clean,
+                        'figado_x': x_liver_start,
+                        'figado_y': y_liver_start,
+                        'rim_x': x_kidney_start,
+                        'rim_y': y_kidney_start,
+                        'HI': f"{hi:.4f}",
+                        'coarseness': f"{coarseness:.4f}",
+                        'contrast': f"{contrast:.4f}",
+                        'periodicity': f"{periodicity:.4f}",
+                        'roughness': f"{roughness:.4f}",
+                        'entropia_d1': f"{entropias[0]:.4f}",
+                        'entropia_d2': f"{entropias[1]:.4f}",
+                        'entropia_d4': f"{entropias[2]:.4f}",
+                        'entropia_d8': f"{entropias[3]:.4f}",
+                        'homogeneidade_d1': f"{homogeneidades[0]:.4f}",
+                        'homogeneidade_d2': f"{homogeneidades[1]:.4f}",
+                        'homogeneidade_d4': f"{homogeneidades[2]:.4f}",
+                        'homogeneidade_d8': f"{homogeneidades[3]:.4f}"
+                    }
 
             # escrever a linha no arquivo csv
             if self.csv_writer:
@@ -636,7 +689,7 @@ class App(Frame):
                 break
             if len(pixel_do_clique) > 0:
                 break
-        
+
         if self.parar_processo:
             self.parar_processo = False  # resetar para futuras chamadas
             return None
