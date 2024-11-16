@@ -52,7 +52,7 @@ class App(Frame):
         self.menu_classificacao = Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Classificação", menu=self.menu_classificacao)
         self.menu_classificacao.add_command(label="Classificar com SVM", command=self.classificar_com_svm)
-        #self.menu_classificacao.add_command(label="Classificar com MobileNet", command=self.classificar_com_mobilenet)
+        self.menu_classificacao.add_command(label="Classificar com MobileNet", command=self.classificar_com_mobilenet)
 
         # submenu para opcoes de ROI
         self.menu_roi = Menu(self.menu_opcoes, tearoff=0)
@@ -725,6 +725,70 @@ class App(Frame):
             return None
         
 # Parte 2 - Classificação
+    # Parte 2 - Classificação
+    # Função genérica de validação cruzada
+    def cross_validate_model(self, X, y_encoded, patient_numbers, train_and_evaluate_func, *args, **kwargs):
+        """
+        Realiza a validação cruzada leave-one-patient-out.
+
+        :param X: Features ou imagens de entrada.
+        :param y_encoded: Labels codificados.
+        :param patient_numbers: Números dos pacientes correspondentes às amostras.
+        :param train_and_evaluate_func: Função que treina e avalia o modelo.
+        :param args: Argumentos adicionais para a função de treinamento e avaliação.
+        :param kwargs: Argumentos nomeados adicionais para a função de treinamento e avaliação.
+        :return: Métricas médias, matrizes de confusão e, opcionalmente, históricos de treinamento.
+        """
+        unique_patients = np.unique(patient_numbers)
+        print(f"Realizando validação cruzada leave-one-patient-out com {len(unique_patients)} pacientes.")
+
+        # Inicializa as listas para armazenar as métricas
+        accuracies = []
+        sensitivities = []
+        specificities = []
+        conf_matrices = []
+        histories = []
+
+        for test_patient in unique_patients:
+            # Índices do paciente atual
+            test_indices = np.where(patient_numbers == test_patient)[0]
+
+            # Verifica se o paciente tem pelo menos 10 imagens
+            if len(test_indices) < 10:
+                print(f"Paciente {test_patient} não possui imagens suficientes. Ignorando.")
+                continue
+
+            # Seleciona as primeiras 10 imagens para o teste
+            test_indices = test_indices[:10]
+
+            # Índices de treinamento são todos os outros
+            train_indices = np.where(patient_numbers != test_patient)[0]
+
+            # Divide os dados
+            X_train, X_test = X[train_indices], X[test_indices]
+            y_train, y_test = y_encoded[train_indices], y_encoded[test_indices]
+
+            # Treina e avalia o modelo usando a função fornecida
+            result = train_and_evaluate_func(X_train, X_test, y_train, y_test, *args, **kwargs)
+
+            # Desempacota os resultados
+            acc, sensitivity, specificity, cm = result[:4]
+            history = result[4] if len(result) > 4 else None
+
+            # Armazena as métricas
+            accuracies.append(acc)
+            sensitivities.append(sensitivity)
+            specificities.append(specificity)
+            conf_matrices.append(cm)
+            if history is not None:
+                histories.append(history)
+
+            print(f"Paciente {test_patient}: Acurácia={acc:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}")
+
+        # Calcula as métricas médias
+        avg_accuracy, avg_sensitivity, avg_specificity = self.calculate_average_metrics(accuracies, sensitivities, specificities)
+
+        return avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, histories
 
     # Método para extrair números dos pacientes
     def extract_patient_numbers(self, data):
@@ -736,91 +800,10 @@ class App(Frame):
             if match:
                 return int(match.group(1))
             else:
-                return -1  # ou trate o erro como achar melhor
+                return -1
 
         patient_numbers = data['nome_arquivo'].apply(extract_patient_number).values
         return patient_numbers
-
-    # Método para realizar a validação cruzada
-    def perform_cross_validation(self, X, y_encoded, patient_numbers, num_images_per_test=10):
-        """
-        Realiza a validação cruzada leave-one-patient-out.
-        O conjunto de teste terá 10 imagens de um paciente, enquanto o restante será usado para treino.
-
-        Parâmetros:
-        - X: Features (array)
-        - y_encoded: Rótulos codificados (array)
-        - patient_numbers: Identificadores dos pacientes (array)
-        - num_images_per_test: Número de imagens por paciente no conjunto de teste (default=10)
-
-        Retorna:
-        - accuracies: Lista de acurácias por iteração
-        - sensitivities: Lista de sensibilidades por iteração
-        - specificities: Lista de especificidades por iteração
-        - conf_matrices: Lista de matrizes de confusão por iteração
-        """
-        unique_patients = np.unique(patient_numbers)
-        accuracies = []
-        sensitivities = []
-        specificities = []
-        conf_matrices = []
-
-        print(f"Realizando validação cruzada leave-one-patient-out com {len(unique_patients)} pacientes.")
-
-        for test_patient in unique_patients:
-            # Índices do paciente atual
-            test_indices = np.where(patient_numbers == test_patient)[0]
-
-            # Verifica se o paciente tem pelo menos 10 imagens
-            if len(test_indices) < num_images_per_test:
-                print(f"Paciente {test_patient} não possui imagens suficientes. Ignorando.")
-                continue
-
-            # Seleciona as primeiras 10 imagens para o teste
-            test_indices = test_indices[:num_images_per_test]
-
-            # Índices de treinamento são todos os outros
-            train_indices = np.where(patient_numbers != test_patient)[0]
-
-            # Divide os dados
-            X_train, X_test = X[train_indices], X[test_indices]
-            y_train, y_test = y_encoded[train_indices], y_encoded[test_indices]
-
-            # Treina o classificador SVM
-            clf = SVC(kernel='linear')
-            clf.fit(X_train, y_train)
-
-            # Faz predições no conjunto de teste
-            y_pred = clf.predict(X_test)
-
-            # Calcula as métricas
-            acc = accuracy_score(y_test, y_pred)
-            cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
-
-            # Verifica o shape da matriz de confusão
-            if cm.shape != (2, 2):
-                # Ajusta a matriz de confusão para 2x2
-                cm_new = np.zeros((2, 2), dtype=int)
-                for i, label in enumerate([0, 1]):
-                    if label in y_test or label in y_pred:
-                        idx = np.where((y_test == label) | (y_pred == label))[0]
-                        cm_new[i, :] = cm[i, :] if i < cm.shape[0] else [0, 0]
-                cm = cm_new
-
-            tn, fp, fn, tp = cm.ravel()
-
-            sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
-            specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
-
-            # Armazena as métricas
-            accuracies.append(acc)
-            sensitivities.append(sensitivity)
-            specificities.append(specificity)
-            conf_matrices.append(cm)
-
-            print(f"Paciente {test_patient}: Acurácia={acc:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}")
-
-        return accuracies, sensitivities, specificities, conf_matrices
 
     # Método para calcular as métricas médias
     def calculate_average_metrics(self, accuracies, sensitivities, specificities):
@@ -833,7 +816,7 @@ class App(Frame):
         return avg_accuracy, avg_sensitivity, avg_specificity
 
     # Método para exibir os resultados
-    def display_classification_results(self, avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, label_encoder):
+    def display_classification_results(self, avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, label_encoder, model_name):
         """
         Exibe os resultados da classificação em uma janela.
         """
@@ -842,7 +825,7 @@ class App(Frame):
 
         # Exibe os resultados em uma janela
         result_window = Toplevel(self.root)
-        result_window.title("Resultados da Classificação com SVM")
+        result_window.title(f"Resultados da Classificação com {model_name}")
 
         result_text = f"Média de Acurácia: {avg_accuracy:.4f}\n"
         result_text += f"Média de Sensibilidade: {avg_sensitivity:.4f}\n"
@@ -868,6 +851,38 @@ class App(Frame):
         # Fecha a figura para liberar memória
         plt.close(fig)
 
+    # Função para treinar e avaliar o SVM
+    def train_and_evaluate_svm(self, X_train, X_test, y_train, y_test):
+        from sklearn.svm import SVC
+        from sklearn.metrics import confusion_matrix, accuracy_score
+
+        # Treina o classificador SVM
+        clf = SVC(kernel='linear')
+        clf.fit(X_train, y_train)
+
+        # Faz predições no conjunto de teste
+        y_pred = clf.predict(X_test)
+
+        # Calcula as métricas
+        acc = accuracy_score(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
+
+        # Verifica o shape da matriz de confusão
+        if cm.shape != (2, 2):
+            cm_new = np.zeros((2, 2), dtype=int)
+            for i, label in enumerate([0, 1]):
+                if label in y_test or label in y_pred:
+                    idx = np.where((y_test == label) | (y_pred == label))[0]
+                    cm_new[i, :] = cm[i, :] if i < cm.shape[0] else [0, 0]
+            cm = cm_new
+
+        tn, fp, fn, tp = cm.ravel()
+
+        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+
+        return acc, sensitivity, specificity, cm
+
     # Método principal para a classificação com SVM
     def classificar_com_svm(self):
         # Verifica se o arquivo data.csv existe
@@ -889,25 +904,177 @@ class App(Frame):
 
         # Codifica as labels
         le = LabelEncoder()
-        y_encoded = le.fit_transform(y)  # 'Saudavel' -> 0, 'Esteatose' -> 1
+        y_encoded = le.fit_transform(y)
 
         # Extrai os números dos pacientes dos nomes dos arquivos
         patient_numbers = self.extract_patient_numbers(data)
 
-        # Realiza a validação cruzada
-        accuracies, sensitivities, specificities, conf_matrices = self.perform_cross_validation(X, y_encoded, patient_numbers)
-
-        # Calcula as métricas médias
-        avg_accuracy, avg_sensitivity, avg_specificity = self.calculate_average_metrics(accuracies, sensitivities, specificities)
+        # Executa a validação cruzada
+        avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, _ = self.cross_validate_model(
+            X, y_encoded, patient_numbers, self.train_and_evaluate_svm
+        )
 
         # Exibe os resultados
-        self.display_classification_results(avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le)
+        self.display_classification_results(
+            avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le, model_name="SVM"
+        )
 
-    # Placeholder para a classificação com MobileNet (Parte 3)
+    # Função para treinar e avaliar o MobileNet
+    def train_and_evaluate_mobilenet(self, X_train, X_test, y_train, y_test):
+        import tensorflow as tf
+        from tensorflow.keras.applications.mobilenet import MobileNet, preprocess_input
+        from tensorflow.keras.models import Model
+        from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
+        from sklearn.metrics import confusion_matrix, accuracy_score
+
+        # Pré-processamento das imagens
+        X_train = preprocess_input(X_train)
+        X_test = preprocess_input(X_test)
+
+        # Criação do modelo com MobileNet pré-treinado
+        base_model = MobileNet(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+        x = base_model.output
+        x = GlobalAveragePooling2D()(x)
+        x = Dense(1024, activation='relu')(x)
+        predictions = Dense(1, activation='sigmoid')(x)
+        model = Model(inputs=base_model.input, outputs=predictions)
+
+        # Congela as camadas do modelo base
+        for layer in base_model.layers:
+            layer.trainable = False
+
+        # Compila o modelo
+        model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+        # Define callbacks
+        callbacks = [
+            tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+        ]
+
+        # Treinamento do modelo
+        history = model.fit(
+            X_train, y_train,
+            epochs=5,
+            batch_size=16,
+            validation_data=(X_test, y_test),
+            callbacks=callbacks,
+            verbose=1
+        )
+
+        # Faz predições no conjunto de teste
+        y_pred = (model.predict(X_test) > 0.5).astype("int32")
+
+        # Calcula as métricas
+        acc = accuracy_score(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
+
+        # Verifica o shape da matriz de confusão
+        if cm.shape != (2, 2):
+            cm_new = np.zeros((2, 2), dtype=int)
+            for i, label in enumerate([0, 1]):
+                if label in y_test or label in y_pred:
+                    idx = np.where((y_test == label) | (y_pred == label))[0]
+                    cm_new[i, :] = cm[i, :] if i < cm.shape[0] else [0, 0]
+            cm = cm_new
+
+        tn, fp, fn, tp = cm.ravel()
+
+        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+
+        return acc, sensitivity, specificity, cm, history
+
+    # Método principal para a classificação com MobileNet
     def classificar_com_mobilenet(self):
-        pass
+        import tensorflow as tf
+        from tensorflow.keras.preprocessing.image import load_img, img_to_array
+        from sklearn.preprocessing import LabelEncoder
 
+        # Verifica se o arquivo data.csv existe
+        if not os.path.isfile('data.csv'):
+            messagebox.showerror("Erro", "Arquivo 'data.csv' não encontrado. Por favor, gere o arquivo primeiro.")
+            return
 
+        # Carrega os dados do CSV
+        data = pd.read_csv('data.csv', delimiter=';')
+
+        # Carrega as imagens e rótulos
+        image_files = data['nome_arquivo'].values
+        y = data['classe'].values
+
+        # Codifica as labels
+        le = LabelEncoder()
+        y_encoded = le.fit_transform(y)
+
+        # Extrai os números dos pacientes dos nomes dos arquivos
+        patient_numbers = self.extract_patient_numbers(data)
+
+        # Diretório das imagens
+        image_dir = "ROIS"  # Ajuste o diretório conforme necessário
+
+        # Carrega as imagens
+        images = []
+        for img_file in image_files:
+            full_path = os.path.join(image_dir, img_file)
+            if os.path.isfile(full_path):
+                img = load_img(full_path, target_size=(224, 224))
+                img_array = img_to_array(img)
+                images.append(img_array)
+            else:
+                print(f"Arquivo {full_path} não encontrado.")
+                messagebox.showerror("Erro", f"Arquivo {full_path} não encontrado.")
+                return
+
+        X = np.array(images)
+        y_encoded = np.array(y_encoded)
+
+        # Executa a validação cruzada
+        avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, histories = self.cross_validate_model(
+            X, y_encoded, patient_numbers, self.train_and_evaluate_mobilenet
+        )
+
+        # Exibe os resultados
+        self.display_classification_results(
+            avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le, model_name="MobileNet"
+        )
+
+        # Plota as curvas de aprendizado médias
+        self.plot_learning_curves(histories)
+
+    # Método para plotar as curvas de aprendizado
+    def plot_learning_curves(self, histories):
+        # Inicializa as listas para armazenar as métricas por época
+        max_epochs = max([len(history.history['accuracy']) for history in histories])
+        num_folds = len(histories)
+        train_acc_epochs = np.full((max_epochs, num_folds), np.nan)
+        val_acc_epochs = np.full((max_epochs, num_folds), np.nan)
+
+        for fold_idx, history in enumerate(histories):
+            num_epochs_fold = len(history.history['accuracy'])
+            train_acc_epochs[:num_epochs_fold, fold_idx] = history.history['accuracy']
+            val_acc_epochs[:num_epochs_fold, fold_idx] = history.history['val_accuracy']
+
+        # Calcula o número de épocas treinadas em cada fold
+        num_epochs_per_fold = np.sum(~np.isnan(train_acc_epochs), axis=0)
+
+        # Determina o número máximo de épocas treinadas em qualquer fold
+        num_epochs_eff = int(np.max(num_epochs_per_fold))
+        epochs_range = range(1, num_epochs_eff + 1)
+
+        # Calcula as métricas médias por época, ignorando NaNs
+        avg_train_acc = np.nanmean(train_acc_epochs[:num_epochs_eff, :], axis=1)
+        avg_val_acc = np.nanmean(val_acc_epochs[:num_epochs_eff, :], axis=1)
+
+        # Plota as curvas de aprendizado
+        plt.figure(figsize=(8, 6))
+        plt.plot(epochs_range, avg_train_acc, label='Acurácia de Treino')
+        plt.plot(epochs_range, avg_val_acc, label='Acurácia de Validação')
+        plt.legend(loc='lower right')
+        plt.title('Acurácia Média de Treino e Validação por Época')
+        plt.xlabel('Épocas')
+        plt.ylabel('Acurácia')
+        plt.tight_layout()
+        plt.show()
 # iniciar o aplicativo
 root = Tk()
 app = App(root)
