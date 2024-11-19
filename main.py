@@ -23,6 +23,7 @@ from tkinter import ttk
 from tkinter import DoubleVar, IntVar
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # Adicionado aqui
 import time  # Para medir o tempo de execução
+import random
 # variaveis para facilitar debug
 CARREGAR_DATASET_AUTOMATICO = False
 
@@ -759,7 +760,7 @@ class App(Frame):
     # Função genérica de validação cruzada
     def cross_validate_model(self, X, y_encoded, patient_numbers, train_and_evaluate_func, *args, **kwargs):
         """
-        Realiza a validação cruzada leave-one-patient-out.
+        Realiza validação cruzada Leave-One-Patient-Out com seleção aleatória do paciente para teste.
 
         :param X: Features ou imagens de entrada.
         :param y_encoded: Labels codificados.
@@ -767,19 +768,24 @@ class App(Frame):
         :param train_and_evaluate_func: Função que treina e avalia o modelo.
         :param args: Argumentos adicionais para a função de treinamento e avaliação.
         :param kwargs: Argumentos nomeados adicionais para a função de treinamento e avaliação.
-        :return: Métricas médias, matrizes de confusão e, opcionalmente, históricos de treinamento.
+        :return: Métricas médias, matrizes de confusão e históricos de treinamento.
         """
         unique_patients = np.unique(patient_numbers)
-        print(f"Realizando validação cruzada leave-one-patient-out com {len(unique_patients)} pacientes.")
+        print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatória de pacientes ({len(unique_patients)} pacientes).")
 
-        # Inicializa as listas para armazenar as métricas
+        # Lista para armazenar as métricas
         accuracies = []
         sensitivities = []
         specificities = []
         conf_matrices = []
         histories = []
 
-        for test_patient in unique_patients:
+        # Embaralha a ordem dos pacientes
+        randomized_patients = list(unique_patients)
+        random.shuffle(randomized_patients)
+
+        # Itera sobre cada paciente escolhido aleatoriamente
+        for test_patient in randomized_patients:
             # Índices do paciente atual
             test_indices = np.where(patient_numbers == test_patient)[0]
 
@@ -813,7 +819,7 @@ class App(Frame):
             if history is not None:
                 histories.append(history)
 
-            print(f"Paciente {test_patient}: Acurácia={acc:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}")
+            print(f"Paciente {test_patient} (aleatório): Acurácia={acc:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}")
 
         # Calcula as métricas médias
         avg_accuracy, avg_sensitivity, avg_specificity = self.calculate_average_metrics(accuracies, sensitivities, specificities)
