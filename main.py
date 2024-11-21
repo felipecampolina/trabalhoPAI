@@ -763,13 +763,16 @@ class App(Frame):
 # ------------------------------------------------------------------------------------------------------------- Parte 2 - Classificação ----------------------------------------------------------
    # Parte 2 - Classificação
 
-    def validacao_cruzada(self, X, y_encoded, pacientes, treinar_avaliar): #V
-
+    def validacao_cruzada(self, X, y_encoded, pacientes, treinar_avaliar):
         print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatória de pacientes ({len(pacientes)} pacientes).")
-
+        seed = 42
+        np.random.seed(seed)
+        
         accuracies = []
         sensitivities = []
         specificities = []
+        precisions = []
+        f1_scores = []
         matrizes_confusao = []
         histories = []
 
@@ -782,7 +785,7 @@ class App(Frame):
             if len(indice_test) < 10:
                 print(f"Paciente {paciente_teste} não possui imagens suficientes. Ignorando.")
                 continue
-            indice_test = indice_test[:10]
+            indice_test = np.random.choice(indice_test, size=10, replace=False)
 
             indices_train = np.where(pacientes != paciente_teste)[0]
 
@@ -794,23 +797,29 @@ class App(Frame):
             accuracy = result['accuracy']
             sensitivity = result['sensitivity']
             specificity = result['specificity']
+            precision = result['precision']
+            f1_score = result['f1_score']
             matriz_confusao = result['matriz_confusao']
-            if len(result) > 4:
+            if 'history' in result:
                 history = result['history']
 
-            accuracies.append(result['accuracy'])
+            accuracies.append(accuracy)
             sensitivities.append(sensitivity)
             specificities.append(specificity)
+            precisions.append(precision)
+            f1_scores.append(f1_score)
             matrizes_confusao.append(matriz_confusao)
-            if len(result) > 4:
+            if 'history' in result:
                 histories.append(history)
 
-            print(f"Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}")
+            print(f"Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}, Precisão={precision:.4f}, F1-score={f1_score:.4f}")
 
-        media_accuracy    = np.mean(accuracies)
+        media_accuracy = np.mean(accuracies)
         media_sensitivity = np.mean(sensitivities)
         media_specificity = np.mean(specificities)
-        return media_accuracy, media_sensitivity, media_specificity, matrizes_confusao, histories
+        media_precision = np.mean(precisions)
+        media_f1_score = np.mean(f1_scores)
+        return media_accuracy, media_sensitivity, media_specificity, media_precision, media_f1_score, matrizes_confusao, histories
 
     # Método para extrair números dos pacientes
     def extract_patient_numbers(self, data : pd.DataFrame):
@@ -827,34 +836,61 @@ class App(Frame):
         patient_numbers = data['nome_arquivo'].apply(extract_patient_number).values
         return patient_numbers
 
-    def exibir_resultados(self, avg_accuracy, avg_sensitivity, avg_specificity, matrizes_confusao, label_encoder, modelo : str): #V
-
+    def exibir_resultados(self, avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, label_encoder, modelo):
         result_window = Toplevel(self.root)
         result_window.title(f"Resultados da Classificação com {modelo}")
 
-        # mostrar dados
+        # Mostrar dados médios
         s = f"Média de Acurácia: {avg_accuracy:.4f}\n"
-        s += f"Média de Sensibilidade: {avg_sensitivity:.4f}\n"
+        s += f"Média de Sensibilidade (Recall): {avg_sensitivity:.4f}\n"
         s += f"Média de Especificidade: {avg_specificity:.4f}\n"
+        s += f"Média de Precisão: {avg_precision:.4f}\n"
+        s += f"Média de F1-score: {avg_f1_score:.4f}\n\n"
+
+        # Calcular métricas a partir da matriz de confusão acumulada
+        total_matrizes_confusao = np.sum(matrizes_confusao, axis=0)
+        tp, fp, fn, tn = total_matrizes_confusao.ravel()
+        print(tn, fp, fn, tp)
+        accuracy_accum = (tp + tn) / (tp + tn + fp + fn)
+        sensitivity_accum = tp / (tp + fn) if (tp + fn) != 0 else 0
+        specificity_accum = tn / (tn + fp) if (tn + fp) != 0 else 0
+        precision_accum = tp / (tp + fp) if (tp + fp) != 0 else 0
+        f1_score_accum = (2 * precision_accum * sensitivity_accum) / (precision_accum + sensitivity_accum) if (precision_accum + sensitivity_accum) != 0 else 0
+
+        # Mostrar métricas acumuladas
+        s += "Métricas calculadas a partir da matriz de confusão acumulada:\n"
+        s += f"Acurácia: {accuracy_accum:.4f}\n"
+        s += f"Sensibilidade (Recall): {sensitivity_accum:.4f}\n"
+        s += f"Especificidade: {specificity_accum:.4f}\n"
+        s += f"Precisão: {precision_accum:.4f}\n"
+        s += f"F1-score: {f1_score_accum:.4f}\n"
         Label(result_window, text=s).pack(pady=10)
 
-        # mostrar matriz de confusao
-        total_matrizes_confusao = np.sum(matrizes_confusao, axis=0)
+        # Mostrar matriz de confusão
         fig, ax = plt.subplots(figsize=(6, 4))
-        sns.heatmap( total_matrizes_confusao, annot=True, fmt='d', cmap='Blues', xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_, ax=ax )
+        sns.heatmap(
+            total_matrizes_confusao,
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            xticklabels=label_encoder.classes_,
+            yticklabels=label_encoder.classes_,
+            ax=ax
+        )
         ax.set_xlabel('Predição')
         ax.set_ylabel('Verdadeiro')
         ax.set_title('Matriz de Confusão após Validação Cruzada')
 
-        # insere o grafico na janela
+        # Insere o gráfico na janela
         canvas = FigureCanvasTkAgg(fig, master=result_window)
         canvas.draw()
         canvas.get_tk_widget().pack()
 
         plt.close(fig)
 
+
     # Função para treinar e avaliar o SVM
-    def classificar_com_svm(self, retornar_metricas = False):
+    def classificar_com_svm(self, retornar_metricas=False):
         if not os.path.isfile('data.csv'):
             messagebox.showerror("Erro", "Arquivo 'data.csv' não encontrado. Por favor, gere o arquivo primeiro.")
             return None
@@ -881,28 +917,32 @@ class App(Frame):
         start_time = time.time()
 
         # Executa a validação cruzada
-        avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, _ = self.validacao_cruzada( X, y_encoded, patient_numbers, self.treinar_avaliar_svm )
+        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, _ = self.validacao_cruzada(
+            X, y_encoded, patient_numbers, self.treinar_avaliar_svm
+        )
 
         execution_time = time.time() - start_time  # Tempo de execução
 
         if retornar_metricas:
-            return avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, execution_time  # Adicione o tempo ao retorno
+            return avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, execution_time
 
         # Exibe os resultados
-        self.exibir_resultados( avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le, model_name="SVM" )
+        self.exibir_resultados(
+            avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, le, modelo="SVM"
+        )
+
 
     # Função para treinar e avaliar o MobileNet
     def treinar_avaliar_mobilenet(self, X_train, X_test, y_train, y_test):
         from tensorflow.keras.applications.mobilenet import MobileNet, preprocess_input
         from tensorflow.keras.models import Model
         from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
-        from sklearn.metrics import confusion_matrix, accuracy_score
 
-        # pre-processamento das imagens
+        # Pre-processamento das imagens
         X_train = preprocess_input(X_train)
         X_test = preprocess_input(X_test)
 
-        # criacao do modelo com MobileNet pre-treinado
+        # Criação do modelo com MobileNet pré-treinado
         base_model = MobileNet(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 
         # Descongela as camadas para fine-tuning, se especificado
@@ -960,27 +1000,32 @@ class App(Frame):
         )
 
         # Faz predições no conjunto de teste
-        y_pred = (model.predict(X_test) > 0.5).astype("int32")
+        y_pred_prob = model.predict(X_test)
+        y_pred = (y_pred_prob > 0.5).astype("int32").flatten()
 
-        accuracy = accuracy_score(y_test, y_pred)
+        # Calcula a matriz de confusão
         matriz_confusao = confusion_matrix(y_test, y_pred, labels=[0, 1])
-
         tn, fp, fn, tp = matriz_confusao.ravel()
 
-        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+        # Calcula as métricas a partir da matriz de confusão
+        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) != 0 else 0
+        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0  # Sensibilidade ou Recall
         specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+        precision = tp / (tp + fp) if (tp + fp) != 0 else 0
+        f1 = (2 * precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) != 0 else 0
 
         result = dict()
         result['accuracy'] = accuracy
         result['sensitivity'] = sensitivity
         result['specificity'] = specificity
+        result['precision'] = precision
+        result['f1_score'] = f1
         result['matriz_confusao'] = matriz_confusao
         result['history'] = history
 
         return result
 
     def classificar_com_mobilenet(self, retornar_metricas=False):
-        # Mesma lógica que o SVM, com adição do tempo de execução
         from tensorflow.keras.preprocessing.image import load_img, img_to_array
 
         if not os.path.isfile('data.csv'):
@@ -1013,20 +1058,21 @@ class App(Frame):
 
         start_time = time.time()
 
-        avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, histories = self.validacao_cruzada(
+        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, histories = self.validacao_cruzada(
             X, y_encoded, patient_numbers, self.treinar_avaliar_mobilenet
         )
 
         execution_time = time.time() - start_time  # Tempo de execução
 
         if retornar_metricas:
-            return avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, execution_time, histories
+            return avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, execution_time, histories
 
         self.exibir_resultados(
-            avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le, model_name="MobileNet"
+            avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, le, modelo="MobileNet"
         )
 
         self.plot_learning_curves(histories)
+
 
     # Método para plotar as curvas de aprendizado
     def plot_learning_curves(self, histories, ax=None):
@@ -1077,7 +1123,7 @@ class App(Frame):
             messagebox.showerror("Erro", "Erro na classificação com SVM.")
             return
 
-        avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, conf_matrix_svm, execution_time_svm = svm_results
+        avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, avg_precision_svm, avg_f1_score_svm, conf_matrix_svm, execution_time_svm = svm_results
 
         # Executa a classificação com MobileNet
         mobilenet_results = self.classificar_com_mobilenet(retornar_metricas=True)
@@ -1086,17 +1132,17 @@ class App(Frame):
             messagebox.showerror("Erro", "Erro na classificação com MobileNet.")
             return
 
-        avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, conf_matrix_mobilenet, execution_time_mobilenet, histories_mobilenet = mobilenet_results
+        avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, avg_precision_mobilenet, avg_f1_score_mobilenet, conf_matrix_mobilenet, execution_time_mobilenet, histories_mobilenet = mobilenet_results
 
         # Exibe a tabela comparativa
         self.exibir_tabela_comparativa(
-            avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, conf_matrix_svm,
-            avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, conf_matrix_mobilenet,
+            avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, avg_precision_svm, avg_f1_score_svm, conf_matrix_svm,
+            avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, avg_precision_mobilenet, avg_f1_score_mobilenet, conf_matrix_mobilenet,
             histories_mobilenet, execution_time_svm=execution_time_svm, execution_time_mobilenet=execution_time_mobilenet
         )
 
-    def treinar_avaliar_svm(self, X_train, X_test, y_train, y_test):
 
+    def treinar_avaliar_svm(self, X_train, X_test, y_train, y_test):
         # Parâmetros do SVM
         svm_params = {
             'kernel': self.parametros_svm['kernel'],
@@ -1119,26 +1165,32 @@ class App(Frame):
 
         y_pred = classificador_svm.predict(X_test)
 
-        accuracy = accuracy_score(y_test, y_pred)
+        # Calcula a matriz de confusão
         matriz_confusao = confusion_matrix(y_test, y_pred, labels=[0, 1])
-
         tn, fp, fn, tp = matriz_confusao.ravel()
 
-        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+        # Calcula as métricas a partir da matriz de confusão
+        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) != 0 else 0
+        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0  # Sensibilidade ou Recall
         specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+        precision = tp / (tp + fp) if (tp + fp) != 0 else 0
+        f1 = (2 * precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) != 0 else 0
 
         result = dict()
         result['accuracy'] = accuracy
         result['sensitivity'] = sensitivity
         result['specificity'] = specificity
+        result['precision'] = precision
+        result['f1_score'] = f1
         result['matriz_confusao'] = matriz_confusao
 
         return result
 
-    def exibir_tabela_comparativa( self, avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, conf_matrices_svm, avg_accuracy_mobilenet,
-                                  avg_sensitivity_mobilenet, avg_specificity_mobilenet, conf_matrices_mobilenet, histories_mobilenet, execution_time_svm = None,
-                                  execution_time_mobilenet =None  # Adicionados tempos de execução
-                                  ):
+    def exibir_tabela_comparativa(
+    self, avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, avg_precision_svm, avg_f1_score_svm, conf_matrices_svm,
+    avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, avg_precision_mobilenet, avg_f1_score_mobilenet, conf_matrices_mobilenet,
+    histories_mobilenet, execution_time_svm=None, execution_time_mobilenet=None
+):
         # Cria uma janela para exibir os resultados
         result_window = Toplevel(self.root)
         result_window.title("Comparação de Classificadores")
@@ -1146,23 +1198,66 @@ class App(Frame):
         # Cria uma tabela usando o módulo ttk
         from tkinter import ttk
 
+        # Agrega as matrizes de confusão
+        conf_matrices_svm = np.array(conf_matrices_svm)
+        conf_matrix_svm = np.sum(conf_matrices_svm, axis=0)
+
+        conf_matrices_mobilenet = np.array(conf_matrices_mobilenet)
+        conf_matrix_mobilenet = np.sum(conf_matrices_mobilenet, axis=0)
+
+        # Calcular métricas a partir das matrizes de confusão acumuladas
+        tn_svm, fp_svm, fn_svm, tp_svm = conf_matrix_svm.ravel()
+        accuracy_svm_accum = (tp_svm + tn_svm) / (tp_svm + tn_svm + fp_svm + fn_svm)
+        sensitivity_svm_accum = tp_svm / (tp_svm + fn_svm) if (tp_svm + fn_svm) != 0 else 0
+        specificity_svm_accum = tn_svm / (tn_svm + fp_svm) if (tn_svm + fp_svm) != 0 else 0
+        precision_svm_accum = tp_svm / (tp_svm + fp_svm) if (tp_svm + fp_svm) != 0 else 0
+        f1_score_svm_accum = (2 * precision_svm_accum * sensitivity_svm_accum) / (precision_svm_accum + sensitivity_svm_accum) if (precision_svm_accum + sensitivity_svm_accum) != 0 else 0
+
+        tn_mob, fp_mob, fn_mob, tp_mob = conf_matrix_mobilenet.ravel()
+        accuracy_mob_accum = (tp_mob + tn_mob) / (tp_mob + tn_mob + fp_mob + fn_mob)
+        sensitivity_mob_accum = tp_mob / (tp_mob + fn_mob) if (tp_mob + fn_mob) != 0 else 0
+        specificity_mob_accum = tn_mob / (tn_mob + fp_mob) if (tn_mob + fp_mob) != 0 else 0
+        precision_mob_accum = tp_mob / (tp_mob + fp_mob) if (tp_mob + fp_mob) != 0 else 0
+        f1_score_mob_accum = (2 * precision_mob_accum * sensitivity_mob_accum) / (precision_mob_accum + sensitivity_mob_accum) if (precision_mob_accum + sensitivity_mob_accum) != 0 else 0
+
         # Dados para a tabela
         metrics = [
-            "Acurácia Média", 
-            "Sensibilidade Média", 
-            "Especificidade Média", 
-            "Tempo de Execução (segundos)"  # Nova linha para tempos de execução
+            "Acurácia Média",
+            "Acurácia (Matriz Acumulada)",
+            "Sensibilidade Média",
+            "Sensibilidade (Matriz Acumulada)",
+            "Especificidade Média",
+            "Especificidade (Matriz Acumulada)",
+            "Precisão Média",
+            "Precisão (Matriz Acumulada)",
+            "F1-score Médio",
+            "F1-score (Matriz Acumulada)",
+            "Tempo de Execução (segundos)"
         ]
         svm_values = [
-            f"{avg_accuracy_svm:.4f}", 
-            f"{avg_sensitivity_svm:.4f}", 
-            f"{avg_specificity_svm:.4f}", 
+            f"{avg_accuracy_svm:.4f}",
+            f"{accuracy_svm_accum:.4f}",
+            f"{avg_sensitivity_svm:.4f}",
+            f"{sensitivity_svm_accum:.4f}",
+            f"{avg_specificity_svm:.4f}",
+            f"{specificity_svm_accum:.4f}",
+            f"{avg_precision_svm:.4f}",
+            f"{precision_svm_accum:.4f}",
+            f"{avg_f1_score_svm:.4f}",
+            f"{f1_score_svm_accum:.4f}",
             f"{execution_time_svm:.2f}" if execution_time_svm is not None else "N/A"
         ]
         mobilenet_values = [
-            f"{avg_accuracy_mobilenet:.4f}", 
-            f"{avg_sensitivity_mobilenet:.4f}", 
-            f"{avg_specificity_mobilenet:.4f}", 
+            f"{avg_accuracy_mobilenet:.4f}",
+            f"{accuracy_mob_accum:.4f}",
+            f"{avg_sensitivity_mobilenet:.4f}",
+            f"{sensitivity_mob_accum:.4f}",
+            f"{avg_specificity_mobilenet:.4f}",
+            f"{specificity_mob_accum:.4f}",
+            f"{avg_precision_mobilenet:.4f}",
+            f"{precision_mob_accum:.4f}",
+            f"{avg_f1_score_mobilenet:.4f}",
+            f"{f1_score_mob_accum:.4f}",
             f"{execution_time_mobilenet:.2f}" if execution_time_mobilenet is not None else "N/A"
         ]
 
@@ -1189,13 +1284,6 @@ class App(Frame):
         # Frame para o gráfico de aprendizado
         learning_curve_frame = Frame(notebook)
         notebook.add(learning_curve_frame, text='Gráfico de Aprendizado')
-
-        # Agrega as matrizes de confusão
-        conf_matrices_svm = np.array(conf_matrices_svm)  # Converte para numpy array se ainda não for
-        conf_matrix_svm = np.sum(conf_matrices_svm, axis=0)  # Soma todas as matrizes de confusão do SVM
-
-        conf_matrices_mobilenet = np.array(conf_matrices_mobilenet)
-        conf_matrix_mobilenet = np.sum(conf_matrices_mobilenet, axis=0)  # Soma todas as matrizes de confusão do MobileNet
 
         # Exibe as matrizes de confusão lado a lado
         fig_cm, axes_cm = plt.subplots(1, 2, figsize=(12, 5))
@@ -1228,6 +1316,8 @@ class App(Frame):
 
         # Fecha a figura para liberar memória
         plt.close(fig_lc)
+
+
     # Método para o Menu de Parâmetros
     def menu_de_parametros(self):
         # Cria uma janela para os parâmetros
