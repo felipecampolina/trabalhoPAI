@@ -88,6 +88,7 @@ class App(Frame):
         self.menu_classificacao.add_command(label="Classificar com SVM", command=self.classificar_com_svm)
         self.menu_classificacao.add_command(label="Classificar com MobileNet", command=self.classificar_com_mobilenet)
         self.menu_classificacao.add_command(label="Classificar e Comparar", command=self.classificar_e_comparar)
+        self.menu_classificacao.add_command(label="Executar Modelo MobileNet Salvo", command=self.executar_modelo_salvo)
         self.menu_classificacao.add_command(label="Menu de Parâmetros", command=self.menu_de_parametros)
         # submenu para opcoes de ROI
         self.menu_roi = Menu(self.menu_opcoes, tearoff=0)
@@ -762,9 +763,8 @@ class App(Frame):
         
 # ------------------------------------------------------------------------------------------------------------- Parte 2 - Classificação ----------------------------------------------------------
    # Parte 2 - Classificação
-
     def validacao_cruzada(self, X, y_encoded, pacientes, treinar_avaliar):
-        print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatória de pacientes ({len(pacientes)} pacientes).")
+        print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatória de pacientes ({len(np.unique(pacientes))} pacientes).")
         seed = 42
         np.random.seed(seed)
         
@@ -775,6 +775,15 @@ class App(Frame):
         f1_scores = []
         matrizes_confusao = []
         histories = []
+
+        best_accuracy = 0.0
+        best_model = None
+        fold_number = 1  # Para rastrear o número do fold
+
+        # Cria um diretório para salvar as matrizes de confusão
+        conf_matrix_dir = "matrizes_confusao"
+        if not os.path.exists(conf_matrix_dir):
+            os.makedirs(conf_matrix_dir)
 
         pacientes_ordem_aleatoria = list(np.unique(pacientes))
         random.shuffle(pacientes_ordem_aleatoria)
@@ -802,6 +811,8 @@ class App(Frame):
             matriz_confusao = result['matriz_confusao']
             if 'history' in result:
                 history = result['history']
+            if 'model' in result:
+                model = result['model']
 
             accuracies.append(accuracy)
             sensitivities.append(sensitivity)
@@ -812,7 +823,19 @@ class App(Frame):
             if 'history' in result:
                 histories.append(history)
 
-            print(f"Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}, Precisão={precision:.4f}, F1-score={f1_score:.4f}")
+            # Salvar a matriz de confusão como imagem .png
+            conf_matrix_filename = os.path.join(conf_matrix_dir, f"matriz_confusao_fold_{fold_number}.png")
+            self.salvar_matriz_confusao_como_imagem(matriz_confusao, conf_matrix_filename)
+
+            # Comparar e salvar o melhor modelo
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                # Salvar o modelo
+                model.save('mobilenet_model.h5')
+
+            print(f"Fold {fold_number} - Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}, Precisão={precision:.4f}, F1-score={f1_score:.4f}")
+
+            fold_number += 1
 
         media_accuracy = np.mean(accuracies)
         media_sensitivity = np.mean(sensitivities)
@@ -820,6 +843,23 @@ class App(Frame):
         media_precision = np.mean(precisions)
         media_f1_score = np.mean(f1_scores)
         return media_accuracy, media_sensitivity, media_specificity, media_precision, media_f1_score, matrizes_confusao, histories
+
+    def salvar_matriz_confusao_como_imagem(self, matriz_confusao, filename):
+        plt.figure(figsize=(6, 4))
+        sns.heatmap(
+            matriz_confusao,
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            xticklabels=['Esteatose', 'Saudável'],
+            yticklabels=['Esteatose', 'Saudável']
+        )
+        plt.xlabel('Predição')
+        plt.ylabel('Verdadeiro')
+        plt.title(f'Matriz de Confusão')
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
 
     # Método para extrair números dos pacientes
     def extract_patient_numbers(self, data : pd.DataFrame):
@@ -931,8 +971,6 @@ class App(Frame):
             avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, conf_matrices, le, modelo="SVM"
         )
 
-
-    # Função para treinar e avaliar o MobileNet
     def treinar_avaliar_mobilenet(self, X_train, X_test, y_train, y_test):
         from tensorflow.keras.applications.mobilenet import MobileNet, preprocess_input
         from tensorflow.keras.models import Model
@@ -1022,6 +1060,7 @@ class App(Frame):
         result['f1_score'] = f1
         result['matriz_confusao'] = matriz_confusao
         result['history'] = history
+        result['model'] = model  # Retorna o modelo
 
         return result
 
@@ -1073,9 +1112,7 @@ class App(Frame):
 
         self.plot_learning_curves(histories)
 
-
-    # Método para plotar as curvas de aprendizado
-    def plot_learning_curves(self, histories, ax=None):
+    def plot_learning_curves(self, histories):
         # Inicializa as listas para armazenar as métricas por época
         max_epochs = max([len(history.history['accuracy']) for history in histories])
         num_folds = len(histories)
@@ -1098,12 +1135,12 @@ class App(Frame):
         avg_train_acc = np.nanmean(train_acc_epochs[:num_epochs_eff, :], axis=1)
         avg_val_acc = np.nanmean(val_acc_epochs[:num_epochs_eff, :], axis=1)
 
-        # Plota as curvas de aprendizado
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 6))
-        else:
-            fig = plt.gcf()
+        # Cria uma nova janela Tkinter para exibir o gráfico
+        graph_window = Toplevel(self.root)
+        graph_window.title("Gráfico de Aprendizado - MobileNet")
 
+        # Plota as curvas de aprendizado
+        fig, ax = plt.subplots(figsize=(8, 6))
         ax.plot(epochs_range, avg_train_acc, label='Acurácia de Treino')
         ax.plot(epochs_range, avg_val_acc, label='Acurácia de Validação')
         ax.legend(loc='lower right')
@@ -1112,8 +1149,12 @@ class App(Frame):
         ax.set_ylabel('Acurácia')
         plt.tight_layout()
 
-        # Retorna a figura para ser usada em outra função
-        return fig
+        # Insere o gráfico na janela Tkinter
+        canvas = FigureCanvasTkAgg(fig, master=graph_window)
+        canvas.draw()
+        canvas.get_tk_widget().pack()
+
+        plt.close(fig)  # Fecha a figura para liberar memória
 
     def classificar_e_comparar(self):
         # Executa a classificação com SVM
@@ -1317,6 +1358,51 @@ class App(Frame):
         # Fecha a figura para liberar memória
         plt.close(fig_lc)
 
+    def executar_modelo_salvo(self):
+        import tensorflow as tf
+        from tensorflow.keras.preprocessing.image import load_img, img_to_array
+        from tensorflow.keras.applications.mobilenet import preprocess_input
+
+        if not os.path.exists('mobilenet_model.h5'):
+            messagebox.showerror("Erro", "O modelo salvo não foi encontrado. Por favor, treine e salve o modelo primeiro.")
+            return
+
+        # Solicita ao usuário que selecione uma imagem
+        image_path = filedialog.askopenfilename(title="Selecione uma imagem para classificação", filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
+        if not image_path:
+            return  # Usuário cancelou
+
+        # Carrega e processa a imagem selecionada
+        try:
+            img = load_img(image_path, target_size=(224, 224))
+            img_array = img_to_array(img)
+            img_array = np.expand_dims(img_array, axis=0)  # Adiciona dimensão de lote
+            img_array = preprocess_input(img_array)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar a imagem: {e}")
+            return
+
+        # Carrega o modelo salvo
+        try:
+            model = tf.keras.models.load_model('mobilenet_model.h5')
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar o modelo salvo: {e}")
+            return
+
+        # Realiza a predição
+        try:
+            y_pred_prob = model.predict(img_array)
+            y_pred = (y_pred_prob > 0.5).astype("int32").flatten()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao fazer a previsão: {e}")
+            return
+
+        # Mapeia a classe predita para o rótulo correspondente
+        class_mapping = {1: 'Saudavel', 0: 'Esteatose'}
+        class_label = class_mapping.get(y_pred[0], 'Desconhecido')
+
+        # Exibe o resultado
+        messagebox.showinfo("Resultado da Classificação", f"A imagem foi classificada como: {class_label}")
 
     # Método para o Menu de Parâmetros
     def menu_de_parametros(self):
@@ -1494,7 +1580,6 @@ class App(Frame):
             param_window.destroy()
 
         Button(param_window, text="Salvar", command=salvar_parametros).pack(pady=10)
-
 
 # iniciar o aplicativo
 root = Tk()
