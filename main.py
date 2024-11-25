@@ -775,9 +775,8 @@ class App(Frame):
         f1_scores = []
         matrizes_confusao = []
         histories = []
-
+        model = None
         best_accuracy = 0.0
-        best_model = None
         fold_number = 1  # Para rastrear o número do fold
 
         # Cria um diretório para salvar as matrizes de confusão
@@ -811,8 +810,12 @@ class App(Frame):
             matriz_confusao = result['matriz_confusao']
             if 'history' in result:
                 history = result['history']
+            else:
+                history = None
             if 'model' in result:
                 model = result['model']
+            else:
+                model = None
 
             accuracies.append(accuracy)
             sensitivities.append(sensitivity)
@@ -830,8 +833,9 @@ class App(Frame):
             # Comparar e salvar o melhor modelo
             if accuracy > best_accuracy:
                 best_accuracy = accuracy
-                # Salvar o modelo
-                model.save('mobilenet_model.h5')
+                if model is not None:
+                    # Salva o modelo apenas se ele existir
+                    model.save('mobilenet_model.h5')
 
             print(f"Fold {fold_number} - Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}, Precisão={precision:.4f}, F1-score={f1_score:.4f}")
 
