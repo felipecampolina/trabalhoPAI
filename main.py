@@ -12,7 +12,7 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from tkinter import Tk, Button, Label, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, Radiobutton, Entry, Frame, DoubleVar, IntVar
+from tkinter import Tk, Button, Label, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, Radiobutton, Entry, Frame, DoubleVar, IntVar, ttk
 from PIL import Image, ImageTk
 from skimage.feature import graycomatrix, graycoprops
 import scipy.io
@@ -23,11 +23,18 @@ from sklearn.svm import SVC
 from sklearn.metrics import confusion_matrix, accuracy_score
 from sklearn.preprocessing import LabelEncoder
 import seaborn as sns
-import matplotlib.pyplot as plt
 import tensorflow as tf
 from sklearn.svm import SVC
 from sklearn.metrics import confusion_matrix, accuracy_score
-from sklearn.preprocessing import LabelEncoder
+
+# keras
+import keras._tf_keras.keras as keras
+from keras._tf_keras.keras.applications.mobilenet import MobileNet, preprocess_input
+from keras._tf_keras.keras.models import Model
+from keras._tf_keras.keras.layers import Dense, GlobalAveragePooling2D, Dropout
+from keras._tf_keras.keras.callbacks import History
+from keras._tf_keras.keras.preprocessing.image import load_img, img_to_array
+
 
 # variaveis para facilitar debug
 CARREGAR_DATASET_AUTOMATICO = False
@@ -46,7 +53,7 @@ class App(Frame):
         root.config(menu=self.menu_bar)
 
         # padrao SVM
-        self.parametros_svm = {
+        self.parametros_svm : dict[ str | int | float | None ] = {
             'kernel': 'linear',
             'C': 1.0,
             'gamma': 'scale',
@@ -57,7 +64,7 @@ class App(Frame):
         }
 
         # padrao MobileNet
-        self.parametros_mobilenet = {
+        self.parametros_mobilenet : dict[ str | int | float ]= {
             'epochs': 5,
             'batch_size': 16,
             'optimizer': 'adam',
@@ -88,6 +95,7 @@ class App(Frame):
         self.menu_classificacao.add_command(label="Classificar com SVM", command=self.classificar_com_svm)
         self.menu_classificacao.add_command(label="Classificar com MobileNet", command=self.classificar_com_mobilenet)
         self.menu_classificacao.add_command(label="Classificar e Comparar", command=self.classificar_e_comparar)
+        self.menu_classificacao.add_command(label="Executar Modelo MobileNet Salvo", command=self.executar_modelo_salvo)
         self.menu_classificacao.add_command(label="Menu de Parâmetros", command=self.menu_de_parametros)
         # submenu para opcoes de ROI
         self.menu_roi = Menu(self.menu_opcoes, tearoff=0)
@@ -762,16 +770,30 @@ class App(Frame):
         
 # ------------------------------------------------------------------------------------------------------------- Parte 2 - Classificação ----------------------------------------------------------
    # Parte 2 - Classificação
+    def validacao_cruzada(self, X, y_encoded, pacientes, treinar_avaliar):
+        if LOG:
+            print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatoria de {len(np.unique(pacientes))} pacientes.")
 
-    def validacao_cruzada(self, X, y_encoded, pacientes, treinar_avaliar): #V
-
-        print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatória de pacientes ({len(pacientes)} pacientes).")
-
+        seed = 42
+        np.random.seed(seed)
+        
+        # variaveis p armazenar resultados
         accuracies = []
         sensitivities = []
         specificities = []
+        precisions = []
+        f1_scores = []
         matrizes_confusao = []
         histories = []
+        model : Model = None
+    
+        best_accuracy = 0.0
+        fold_number = 1
+
+        # pasta para salvar as matrizes de confusão
+        conf_matrix_dir = "matrizes_confusao"
+        if not os.path.exists(conf_matrix_dir):
+            os.makedirs(conf_matrix_dir)
 
         pacientes_ordem_aleatoria = list(np.unique(pacientes))
         random.shuffle(pacientes_ordem_aleatoria)
@@ -782,7 +804,7 @@ class App(Frame):
             if len(indice_test) < 10:
                 print(f"Paciente {paciente_teste} não possui imagens suficientes. Ignorando.")
                 continue
-            indice_test = indice_test[:10]
+            indice_test = np.random.choice(indice_test, size=10, replace=False)
 
             indices_train = np.where(pacientes != paciente_teste)[0]
 
@@ -794,74 +816,186 @@ class App(Frame):
             accuracy = result['accuracy']
             sensitivity = result['sensitivity']
             specificity = result['specificity']
+            precision = result['precision']
+            f1_score = result['f1_score']
             matriz_confusao = result['matriz_confusao']
-            if len(result) > 4:
+            if 'history' in result:
                 history = result['history']
+            else:
+                history = None
 
-            accuracies.append(result['accuracy'])
+            if 'model' in result:
+                model = result['model']
+            else:
+                model = None
+
+            accuracies.append(accuracy)
             sensitivities.append(sensitivity)
             specificities.append(specificity)
+            precisions.append(precision)
+            f1_scores.append(f1_score)
             matrizes_confusao.append(matriz_confusao)
-            if len(result) > 4:
+            if 'history' in result:
                 histories.append(history)
 
-            print(f"Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}")
+            self.salvar_matriz_confusao_como_imagem(matriz_confusao, filename = os.path.join(conf_matrix_dir, f"matriz_confusao_fold_{fold_number}.png"))
 
-        media_accuracy    = np.mean(accuracies)
+            # comparar e salvar o melhor modelo
+            if accuracy > best_accuracy:
+                best_accuracy = accuracy
+                if model is not None:
+                    model.save('mobilenet_model.h5')
+
+            if LOG:
+                print(f"Fold {fold_number} - Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}, Precisão={precision:.4f}, F1-score={f1_score:.4f}")
+
+            fold_number += 1
+
+        media_accuracy = np.mean(accuracies)
         media_sensitivity = np.mean(sensitivities)
         media_specificity = np.mean(specificities)
-        return media_accuracy, media_sensitivity, media_specificity, matrizes_confusao, histories
+        media_precision = np.mean(precisions)
+        media_f1_score = np.mean(f1_scores)
+        return media_accuracy, media_sensitivity, media_specificity, media_precision, media_f1_score, matrizes_confusao, histories
 
-    # Método para extrair números dos pacientes
-    def extract_patient_numbers(self, data : pd.DataFrame):
-        """
-        Extrai os números dos pacientes a partir dos nomes dos arquivos.
-        """
-        def extract_patient_number(filename):
-            match = re.match(r'ROI_(\d+)_\d+\.png', filename)
-            if match:
-                return int(match.group(1))
-            else:
-                return -1
+    def salvar_matriz_confusao_como_imagem(self, matriz_confusao, filename):
+        plt.figure(figsize=(6, 4))
+        sns.heatmap(
+            matriz_confusao,
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            xticklabels=['Esteatose', 'Saudável'],
+            yticklabels=['Esteatose', 'Saudável']
+        )
+        plt.xlabel('Predição')
+        plt.ylabel('Verdadeiro')
+        plt.title(f'Matriz de confusão')
+        plt.tight_layout()
+        plt.savefig(filename)
+        plt.close()
 
-        patient_numbers = data['nome_arquivo'].apply(extract_patient_number).values
+    def extrair_numero_paciente(self, filename):
+        match : re.Match[str] | None = re.match(r'ROI_(\d+)_\d+\.png', filename)
+        if match:
+            # group(1) e o que ta dentro do primeiro parentesis
+            return int(match.group(1)) 
+        else:
+            return -1
+
+    def extrair_numeros_pacientes(self, data : pd.DataFrame):
+        patient_numbers = data['nome_arquivo'].apply(self.extrair_numero_paciente).values
         return patient_numbers
 
-    def exibir_resultados(self, avg_accuracy, avg_sensitivity, avg_specificity, matrizes_confusao, label_encoder, modelo : str): #V
+    def extrair_metricas(self, matriz_confusao : np.ndarray):
+        tp, fn, fp, tn = matriz_confusao.ravel()
+        if LOG:
+            print(f"TP: {tp}, FN: {fn}, FP:{fp}, TN:{tn}")
 
+        # calcula as metricas a partir da matriz de confusao
+        accuracy = (tp + tn) / (tp + tn + fp + fn) if (tp + tn + fp + fn) != 0 else 0
+        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
+        specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
+        precision = tp / (tp + fp) if (tp + fp) != 0 else 0
+        f1 = (2 * precision * sensitivity) / (precision + sensitivity) if (precision + sensitivity) != 0 else 0
+
+        return accuracy, sensitivity, specificity, precision, f1
+
+    def exibir_resultados(self, avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, label_encoder : LabelEncoder, modelo : str):
         result_window = Toplevel(self.root)
-        result_window.title(f"Resultados da Classificação com {modelo}")
+        result_window.title(f"Resultados da classificação com {modelo}")
 
-        # mostrar dados
-        s = f"Média de Acurácia: {avg_accuracy:.4f}\n"
-        s += f"Média de Sensibilidade: {avg_sensitivity:.4f}\n"
-        s += f"Média de Especificidade: {avg_specificity:.4f}\n"
+        # dados médios
+        s = f"Média de acurácia: {avg_accuracy:.4f}\n"
+        s += f"Média de sensibilidade (recall): {avg_sensitivity:.4f}\n"
+        s += f"Média de especificidade: {avg_specificity:.4f}\n"
+        s += f"Média de precisão: {avg_precision:.4f}\n"
+        s += f"Média de F1-score: {avg_f1_score:.4f}\n\n"
+
+        # calculando metricas a partir da matriz de confusão acumulada
+        total_matrizes_confusao = np.array(np.sum(matrizes_confusao, axis=0))
+        accuracy_accum, sensitivity_accum, specificity_accum, precision_accum, f1_score_accum = self.extrair_metricas(total_matrizes_confusao)
+        
+        # metricas acumuladas
+        s += "Métricas calculadas a partir da matriz de confusão acumulada:\n"
+        s += f"Acurácia: {accuracy_accum:.4f}\n"
+        s += f"Sensibilidade (recall): {sensitivity_accum:.4f}\n"
+        s += f"Especificidade: {specificity_accum:.4f}\n"
+        s += f"Precisão: {precision_accum:.4f}\n"
+        s += f"F1-score: {f1_score_accum:.4f}\n"
         Label(result_window, text=s).pack(pady=10)
 
-        # mostrar matriz de confusao
-        total_matrizes_confusao = np.sum(matrizes_confusao, axis=0)
+        # mostra matriz de confusao
         fig, ax = plt.subplots(figsize=(6, 4))
-        sns.heatmap( total_matrizes_confusao, annot=True, fmt='d', cmap='Blues', xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_, ax=ax )
+        sns.heatmap(
+            total_matrizes_confusao,
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            xticklabels=label_encoder.classes_,
+            yticklabels=label_encoder.classes_,
+            ax=ax
+        )
         ax.set_xlabel('Predição')
         ax.set_ylabel('Verdadeiro')
-        ax.set_title('Matriz de Confusão após Validação Cruzada')
+        ax.set_title('Matriz de confusão após Validação Cruzada')
 
-        # insere o grafico na janela
+        # insere o gráfico na janela
         canvas = FigureCanvasTkAgg(fig, master=result_window)
         canvas.draw()
         canvas.get_tk_widget().pack()
 
         plt.close(fig)
 
-    # Função para treinar e avaliar o SVM
-    def classificar_com_svm(self, retornar_metricas = False):
+    def treinar_avaliar_svm(self, X_train, X_test, y_train, y_test):
+        # parametros do svm
+        svm_params = {
+            'kernel': self.parametros_svm['kernel'],
+            'C': self.parametros_svm['C'],
+            'gamma': self.parametros_svm['gamma'],
+            'degree': self.parametros_svm['degree'],
+            'coef0': self.parametros_svm['coef0'],
+            'class_weight': self.parametros_svm['class_weight'],
+            'decision_function_shape': self.parametros_svm['decision_function_shape']
+        }
+
+        # ajustar class_weight se necessario
+        if svm_params['class_weight'] == 'None' or svm_params['class_weight'] == '':
+            svm_params['class_weight'] = None
+        elif svm_params['class_weight'] == 'balanced':
+            svm_params['class_weight'] = 'balanced'
+
+        # treino classificador
+        classificador_svm = SVC(**svm_params)
+        classificador_svm.fit(X_train, y_train)
+
+        # testa o classificador
+        y_pred = classificador_svm.predict(X_test)
+
+        # calcula a matriz de confusão
+        matriz_confusao = confusion_matrix(y_test, y_pred, labels=[0, 1])
+
+        # calcula as metricas a partir da matriz de confusao
+        accuracy, sensitivity, specificity, precision, f1 = self.extrair_metricas(matriz_confusao)
+
+        result = dict()
+        result['accuracy'] = accuracy
+        result['sensitivity'] = sensitivity
+        result['specificity'] = specificity
+        result['precision'] = precision
+        result['f1_score'] = f1
+        result['matriz_confusao'] = matriz_confusao
+
+        return result
+
+    def classificar_com_svm(self, retornar_metricas=False):
         if not os.path.isfile('data.csv'):
             messagebox.showerror("Erro", "Arquivo 'data.csv' não encontrado. Por favor, gere o arquivo primeiro.")
             return None
 
+        # carregando dados do csv
         data = pd.read_csv('data.csv', delimiter=';')
 
-        # Define as features e o target
         features = [
             'coarseness', 'contrast', 'periodicity', 'roughness',
             'entropia_d1', 'entropia_d2', 'entropia_d4', 'entropia_d8',
@@ -870,42 +1004,41 @@ class App(Frame):
         X = data[features].astype(float).values
         y = data['classe'].values
 
-        # Codifica as labels
+        # codificando as labels
         le = LabelEncoder()
         y_encoded = le.fit_transform(y)
 
-        # Extrai os números dos pacientes dos nomes dos arquivos
-        patient_numbers = self.extract_patient_numbers(data)
+        # extrair os num dos pacientes a partir do nomes dos arquivos
+        patient_numbers = self.extrair_numeros_pacientes(data)
 
-        # Medir o tempo de execução
         start_time = time.time()
 
-        # Executa a validação cruzada
-        avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, _ = self.validacao_cruzada( X, y_encoded, patient_numbers, self.treinar_avaliar_svm )
+        # VALIDACAO CRUZADA
+        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, _ = self.validacao_cruzada(
+            X, y_encoded, patient_numbers, self.treinar_avaliar_svm
+        )
 
-        execution_time = time.time() - start_time  # Tempo de execução
+        execution_time = time.time() - start_time 
 
+        # retorna metricas OU exibe o resultado
+        # ( retorna as metricas quando é para comparar os modelos )
         if retornar_metricas:
-            return avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, execution_time  # Adicione o tempo ao retorno
+            return avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, execution_time
 
-        # Exibe os resultados
-        self.exibir_resultados( avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le, model_name="SVM" )
+        self.exibir_resultados(
+            avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, le, modelo="SVM"
+        )
 
-    # Função para treinar e avaliar o MobileNet
     def treinar_avaliar_mobilenet(self, X_train, X_test, y_train, y_test):
-        from tensorflow.keras.applications.mobilenet import MobileNet, preprocess_input
-        from tensorflow.keras.models import Model
-        from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout
-        from sklearn.metrics import confusion_matrix, accuracy_score
 
-        # pre-processamento das imagens
+        # preprocessamento das imagens
         X_train = preprocess_input(X_train)
         X_test = preprocess_input(X_test)
 
-        # criacao do modelo com MobileNet pre-treinado
-        base_model = MobileNet(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+        # criacão do modelo com mobilenet pre-treinado do imagenet (fine tunning)
+        base_model : Model = MobileNet(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 
-        # Descongela as camadas para fine-tuning, se especificado
+        # descongela as camadas para fine tuning, se especificado
         if self.parametros_mobilenet['fine_tune_layers'] > 0:
             for layer in base_model.layers[-self.parametros_mobilenet['fine_tune_layers']:]:
                 layer.trainable = True
@@ -920,36 +1053,36 @@ class App(Frame):
         predictions = Dense(1, activation='sigmoid')(x)
         model = Model(inputs=base_model.input, outputs=predictions)
 
-        # Configura o otimizador com a taxa de aprendizado especificada
-        optimizer_name = self.parametros_mobilenet['optimizer']
-        learning_rate = self.parametros_mobilenet['learning_rate']
+        # configura o otimizador com a taxa de aprendizado especificada
+        optimizer_name : str = self.parametros_mobilenet['optimizer']
+        learning_rate : float = self.parametros_mobilenet['learning_rate']
 
         if optimizer_name.lower() == 'adam':
-            optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
+            optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
         elif optimizer_name.lower() == 'sgd':
             momentum = self.parametros_mobilenet.get('momentum', 0.0)
-            optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=momentum)
+            optimizer = keras.optimizers.SGD(learning_rate=learning_rate, momentum=momentum)
         else:
-            optimizer = tf.keras.optimizers.get(optimizer_name)
-            optimizer.learning_rate = learning_rate  # Define a taxa de aprendizado
+            optimizer = keras.optimizers.get(optimizer_name)
+            optimizer.learning_rate = learning_rate  # define a taxa de aprendizado
 
-        # Compila o modelo usando os parâmetros definidos
+        # compila o modelo usando os parametros definidos
         model.compile(
             optimizer=optimizer,
             loss=self.parametros_mobilenet['loss_function'],
             metrics=['accuracy']
         )
 
-        # Define callbacks com o patience especificado
+        # define callbacks com o patience especificado
         callbacks = [
-            tf.keras.callbacks.EarlyStopping(
+            keras.callbacks.EarlyStopping(
                 monitor='val_loss',
                 patience=self.parametros_mobilenet['early_stopping_patience'],
                 restore_best_weights=True
             )
         ]
 
-        # Treinamento do modelo usando os parâmetros definidos
+        # treinamento do modelo usando os parametros definidos
         history = model.fit(
             X_train, y_train,
             epochs=self.parametros_mobilenet['epochs'],
@@ -959,42 +1092,36 @@ class App(Frame):
             verbose=1
         )
 
-        # Faz predições no conjunto de teste
-        y_pred = (model.predict(X_test) > 0.5).astype("int32")
+        # teste
+        y_pred_prob = model.predict(X_test)
+        y_pred = np.array(y_pred_prob > 0.5).astype("int32").flatten()
 
-        accuracy = accuracy_score(y_test, y_pred)
+        # calcula a matriz de confusão
         matriz_confusao = confusion_matrix(y_test, y_pred, labels=[0, 1])
 
-        tn, fp, fn, tp = matriz_confusao.ravel()
-
-        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
-        specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
-
+        # calcula as metricas a partir da matriz de confusao
+        accuracy, sensitivity, specificity, precision, f1 = self.extrair_metricas(matriz_confusao)
         result = dict()
         result['accuracy'] = accuracy
         result['sensitivity'] = sensitivity
         result['specificity'] = specificity
+        result['precision'] = precision
+        result['f1_score'] = f1
         result['matriz_confusao'] = matriz_confusao
         result['history'] = history
+        result['model'] = model
 
         return result
 
     def classificar_com_mobilenet(self, retornar_metricas=False):
-        # Mesma lógica que o SVM, com adição do tempo de execução
-        from tensorflow.keras.preprocessing.image import load_img, img_to_array
-
         if not os.path.isfile('data.csv'):
             messagebox.showerror("Erro", "Arquivo 'data.csv' não encontrado. Por favor, gere o arquivo primeiro.")
             return None
 
+        # carregando dados e imagens
         data = pd.read_csv('data.csv', delimiter=';')
         image_files = data['nome_arquivo'].values
         y = data['classe'].values
-
-        le = LabelEncoder()
-        y_encoded = le.fit_transform(y)
-
-        patient_numbers = self.extract_patient_numbers(data)
 
         image_dir = "ROIS"
         images = []
@@ -1009,28 +1136,37 @@ class App(Frame):
                 return None
 
         X = np.array(images)
-        y_encoded = np.array(y_encoded)
+
+        # codificando as labels
+        le = LabelEncoder()
+        y_encoded = le.fit_transform(y)
+
+        # extrair os num dos pacientes a partir do nomes dos arquivos
+        patient_numbers = self.extrair_numeros_pacientes(data)
 
         start_time = time.time()
 
-        avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, histories = self.validacao_cruzada(
+        # VALIDACAO CRUZADA
+        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, histories = self.validacao_cruzada(
             X, y_encoded, patient_numbers, self.treinar_avaliar_mobilenet
         )
 
-        execution_time = time.time() - start_time  # Tempo de execução
+        execution_time = time.time() - start_time
 
+        # retorna metricas OU exibe o resultado
+        # ( retorna as metricas quando é para comparar os modelos )
         if retornar_metricas:
-            return avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, execution_time, histories
+            return avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, execution_time, histories
 
         self.exibir_resultados(
-            avg_accuracy, avg_sensitivity, avg_specificity, conf_matrices, le, model_name="MobileNet"
+            avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, le, modelo="MobileNet"
         )
 
-        self.plot_learning_curves(histories)
+        self.plot_curvas_aprendizado(histories)
 
-    # Método para plotar as curvas de aprendizado
-    def plot_learning_curves(self, histories, ax=None):
-        # Inicializa as listas para armazenar as métricas por época
+    def plot_curvas_aprendizado(self, histories):
+
+        # inicializa as listas para armazenar as métricas por epoca
         max_epochs = max([len(history.history['accuracy']) for history in histories])
         num_folds = len(histories)
         train_acc_epochs = np.full((max_epochs, num_folds), np.nan)
@@ -1041,210 +1177,222 @@ class App(Frame):
             train_acc_epochs[:num_epochs_fold, fold_idx] = history.history['accuracy']
             val_acc_epochs[:num_epochs_fold, fold_idx] = history.history['val_accuracy']
 
-        # Calcula o número de épocas treinadas em cada fold
+        # calculando o numero de epocas treinadas em cada fold
         num_epochs_per_fold = np.sum(~np.isnan(train_acc_epochs), axis=0)
 
-        # Determina o número máximo de épocas treinadas em qualquer fold
+        # determina o numero max de epocas treinadas em qualquer fold
         num_epochs_eff = int(np.max(num_epochs_per_fold))
         epochs_range = range(1, num_epochs_eff + 1)
 
-        # Calcula as métricas médias por época, ignorando NaNs
+        # calculando as metricas médias por época ignorando NaN
         avg_train_acc = np.nanmean(train_acc_epochs[:num_epochs_eff, :], axis=1)
         avg_val_acc = np.nanmean(val_acc_epochs[:num_epochs_eff, :], axis=1)
 
-        # Plota as curvas de aprendizado
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(8, 6))
-        else:
-            fig = plt.gcf()
+        # cria uma nova janela pra mostrar o gráfico
+        window = Toplevel(self.root)
+        window.title("Gráfico de aprendizado - MobileNet")
 
-        ax.plot(epochs_range, avg_train_acc, label='Acurácia de Treino')
-        ax.plot(epochs_range, avg_val_acc, label='Acurácia de Validação')
+        # plota as curvas de aprendizado
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.plot(epochs_range, avg_train_acc, label='Acurácia de treino')
+        ax.plot(epochs_range, avg_val_acc, label='Acurácia de validação')
         ax.legend(loc='lower right')
-        ax.set_title('Acurácia Média de Treino e Validação por Época')
+        ax.set_title('Acurácia média de treino e validação por época')
         ax.set_xlabel('Épocas')
         ax.set_ylabel('Acurácia')
         plt.tight_layout()
 
-        # Retorna a figura para ser usada em outra função
-        return fig
+        # insere o gráfico na janela
+        canvas = FigureCanvasTkAgg(fig, master=window)
+        canvas.draw()
+        canvas.get_tk_widget().pack()
+
+        plt.close(fig)
 
     def classificar_e_comparar(self):
-        # Executa a classificação com SVM
+        # SVM
         svm_results = self.classificar_com_svm(retornar_metricas=True)
 
         if not svm_results:
             messagebox.showerror("Erro", "Erro na classificação com SVM.")
             return
 
-        avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, conf_matrix_svm, execution_time_svm = svm_results
-
-        # Executa a classificação com MobileNet
+        # MOBILENET
         mobilenet_results = self.classificar_com_mobilenet(retornar_metricas=True)
 
         if not mobilenet_results:
             messagebox.showerror("Erro", "Erro na classificação com MobileNet.")
             return
 
-        avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, conf_matrix_mobilenet, execution_time_mobilenet, histories_mobilenet = mobilenet_results
+        self.exibir_tabela_comparativa(svm_results, mobilenet_results)
 
-        # Exibe a tabela comparativa
-        self.exibir_tabela_comparativa(
-            avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, conf_matrix_svm,
-            avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, conf_matrix_mobilenet,
-            histories_mobilenet, execution_time_svm=execution_time_svm, execution_time_mobilenet=execution_time_mobilenet
-        )
+    def exibir_tabela_comparativa( self, svm_results, mobilenet_results ):
 
-    def treinar_avaliar_svm(self, X_train, X_test, y_train, y_test):
+        # extraindo resultados
+        avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, avg_precision_svm, avg_f1_score_svm, matrizes_confusao_svm, execution_time_svm = svm_results
+        avg_accuracy_mobilenet, avg_sensitivity_mobilenet, avg_specificity_mobilenet, avg_precision_mobilenet, avg_f1_score_mobilenet,  matrizes_confusao_mobilenet, execution_time_mobilenet, histories_mobilenet = mobilenet_results
 
-        # Parâmetros do SVM
-        svm_params = {
-            'kernel': self.parametros_svm['kernel'],
-            'C': self.parametros_svm['C'],
-            'gamma': self.parametros_svm['gamma'],
-            'degree': self.parametros_svm['degree'],
-            'coef0': self.parametros_svm['coef0'],
-            'class_weight': self.parametros_svm['class_weight'],
-            'decision_function_shape': self.parametros_svm['decision_function_shape']
-        }
-
-        # Ajustar o parâmetro 'class_weight' se necessário
-        if svm_params['class_weight'] == 'None' or svm_params['class_weight'] == '':
-            svm_params['class_weight'] = None
-        elif svm_params['class_weight'] == 'balanced':
-            svm_params['class_weight'] = 'balanced'
-
-        classificador_svm = SVC(**svm_params)
-        classificador_svm.fit(X_train, y_train)
-
-        y_pred = classificador_svm.predict(X_test)
-
-        accuracy = accuracy_score(y_test, y_pred)
-        matriz_confusao = confusion_matrix(y_test, y_pred, labels=[0, 1])
-
-        tn, fp, fn, tp = matriz_confusao.ravel()
-
-        sensitivity = tp / (tp + fn) if (tp + fn) != 0 else 0
-        specificity = tn / (tn + fp) if (tn + fp) != 0 else 0
-
-        result = dict()
-        result['accuracy'] = accuracy
-        result['sensitivity'] = sensitivity
-        result['specificity'] = specificity
-        result['matriz_confusao'] = matriz_confusao
-
-        return result
-
-    def exibir_tabela_comparativa( self, avg_accuracy_svm, avg_sensitivity_svm, avg_specificity_svm, conf_matrices_svm, avg_accuracy_mobilenet,
-                                  avg_sensitivity_mobilenet, avg_specificity_mobilenet, conf_matrices_mobilenet, histories_mobilenet, execution_time_svm = None,
-                                  execution_time_mobilenet =None  # Adicionados tempos de execução
-                                  ):
-        # Cria uma janela para exibir os resultados
+        # cria uma janela para exibir os resultados
         result_window = Toplevel(self.root)
-        result_window.title("Comparação de Classificadores")
+        result_window.title("Comparação de classificadores")
 
-        # Cria uma tabela usando o módulo ttk
-        from tkinter import ttk
+        # agrega as matrizes de confusso
+        matriz_confusao_svm = np.array(np.sum(matrizes_confusao_svm, axis=0))
+        matriz_confusao_mobilenet = np.array(np.sum(matrizes_confusao_mobilenet, axis=0))
 
-        # Dados para a tabela
-        metrics = [
-            "Acurácia Média", 
-            "Sensibilidade Média", 
-            "Especificidade Média", 
-            "Tempo de Execução (segundos)"  # Nova linha para tempos de execução
+        # calcula metricas a partir das matrizes de confusão acumuladas
+        accuracy_svm_accum, sensitivity_svm_accum, specificity_svm_accum, precision_svm_accum, f1_score_svm_accum = self.extrair_metricas(matriz_confusao_svm)
+        accuracy_mob_accum, sensitivity_mob_accum, specificity_mob_accum, precision_mob_accum, f1_score_mob_accum = self.extrair_metricas(matriz_confusao_mobilenet)
+
+        # dados para a tabela
+        metricas = [
+            "Acurácia Média",
+            "Acurácia (Matriz Acumulada)",
+            "Sensibilidade Média",
+            "Sensibilidade (Matriz Acumulada)",
+            "Especificidade Média",
+            "Especificidade (Matriz Acumulada)",
+            "Precisão Média",
+            "Precisão (Matriz Acumulada)",
+            "F1-score Médio",
+            "F1-score (Matriz Acumulada)",
+            "Tempo de Execução (segundos)"
         ]
+
         svm_values = [
-            f"{avg_accuracy_svm:.4f}", 
-            f"{avg_sensitivity_svm:.4f}", 
-            f"{avg_specificity_svm:.4f}", 
-            f"{execution_time_svm:.2f}" if execution_time_svm is not None else "N/A"
-        ]
-        mobilenet_values = [
-            f"{avg_accuracy_mobilenet:.4f}", 
-            f"{avg_sensitivity_mobilenet:.4f}", 
-            f"{avg_specificity_mobilenet:.4f}", 
-            f"{execution_time_mobilenet:.2f}" if execution_time_mobilenet is not None else "N/A"
+            f"{avg_accuracy_svm:.4f}",
+            f"{accuracy_svm_accum:.4f}",
+            f"{avg_sensitivity_svm:.4f}",
+            f"{sensitivity_svm_accum:.4f}",
+            f"{avg_specificity_svm:.4f}",
+            f"{specificity_svm_accum:.4f}",
+            f"{avg_precision_svm:.4f}",
+            f"{precision_svm_accum:.4f}",
+            f"{avg_f1_score_svm:.4f}",
+            f"{f1_score_svm_accum:.4f}",
+            f"{execution_time_svm:.2f}"
         ]
 
-        # Configura a tabela
+        mobilenet_values = [
+            f"{avg_accuracy_mobilenet:.4f}",
+            f"{accuracy_mob_accum:.4f}",
+            f"{avg_sensitivity_mobilenet:.4f}",
+            f"{sensitivity_mob_accum:.4f}",
+            f"{avg_specificity_mobilenet:.4f}",
+            f"{specificity_mob_accum:.4f}",
+            f"{avg_precision_mobilenet:.4f}",
+            f"{precision_mob_accum:.4f}",
+            f"{avg_f1_score_mobilenet:.4f}",
+            f"{f1_score_mob_accum:.4f}",
+            f"{execution_time_mobilenet:.2f}"
+        ]
+
+        # configurando a tabela
         tree = ttk.Treeview(result_window, columns=("Métrica", "SVM", "MobileNet"), show='headings')
         tree.heading("Métrica", text="Métrica")
         tree.heading("SVM", text="SVM")
         tree.heading("MobileNet", text="MobileNet")
 
-        # Insere os dados na tabela
-        for metric, svm_val, mobilenet_val in zip(metrics, svm_values, mobilenet_values):
-            tree.insert("", "end", values=(metric, svm_val, mobilenet_val))
+        # insere os dados na tabela
+        for metrica, svm_val, mobilenet_val in zip(metricas, svm_values, mobilenet_values):
+            tree.insert("", "end", values=(metrica, svm_val, mobilenet_val))
 
         tree.pack(pady=10)
 
-        # Cria um notebook para organizar os gráficos
+        # notebook para organizar os gráficos
         notebook = ttk.Notebook(result_window)
         notebook.pack(expand=True, fill='both')
 
-        # Frame para as matrizes de confusão
-        conf_matrix_frame = Frame(notebook)
-        notebook.add(conf_matrix_frame, text='Matrizes de Confusão')
+        # frames
+        frame_matriz_confusao = Frame(notebook)
+        notebook.add(frame_matriz_confusao, text='Matrizes de Confusão')
 
-        # Frame para o gráfico de aprendizado
-        learning_curve_frame = Frame(notebook)
-        notebook.add(learning_curve_frame, text='Gráfico de Aprendizado')
+        frame_curva_aprendizado = Frame(notebook)
+        notebook.add(frame_curva_aprendizado, text='Gráfico de Aprendizado')
 
-        # Agrega as matrizes de confusão
-        conf_matrices_svm = np.array(conf_matrices_svm)  # Converte para numpy array se ainda não for
-        conf_matrix_svm = np.sum(conf_matrices_svm, axis=0)  # Soma todas as matrizes de confusão do SVM
-
-        conf_matrices_mobilenet = np.array(conf_matrices_mobilenet)
-        conf_matrix_mobilenet = np.sum(conf_matrices_mobilenet, axis=0)  # Soma todas as matrizes de confusão do MobileNet
-
-        # Exibe as matrizes de confusão lado a lado
+        # exibe matrizes de confusão uma do lado da outra
         fig_cm, axes_cm = plt.subplots(1, 2, figsize=(12, 5))
 
-        sns.heatmap(conf_matrix_svm, annot=True, fmt='d', cmap='Blues', ax=axes_cm[0])
-        axes_cm[0].set_title('Matriz de Confusão - SVM')
+        sns.heatmap(matriz_confusao_svm, annot=True, fmt='d', cmap='Blues', ax=axes_cm[0])
+        axes_cm[0].set_title('Matriz de confusão - SVM')
         axes_cm[0].set_xlabel('Predição')
         axes_cm[0].set_ylabel('Verdadeiro')
 
-        sns.heatmap(conf_matrix_mobilenet, annot=True, fmt='d', cmap='Blues', ax=axes_cm[1])
-        axes_cm[1].set_title('Matriz de Confusão - MobileNet')
+        sns.heatmap( matriz_confusao_mobilenet, annot=True, fmt='d', cmap='Blues', ax=axes_cm[1])
+        axes_cm[1].set_title('Matriz de confusão - MobileNet')
         axes_cm[1].set_xlabel('Predição')
         axes_cm[1].set_ylabel('Verdadeiro')
 
-        # Insere o gráfico das matrizes de confusão na aba correspondente
-        canvas_cm = FigureCanvasTkAgg(fig_cm, master=conf_matrix_frame)
+        # insere o grafico das matrizes de confusão no frame
+        canvas_cm = FigureCanvasTkAgg(fig_cm, master=frame_matriz_confusao)
         canvas_cm.draw()
         canvas_cm.get_tk_widget().pack()
-
-        # Fecha a figura para liberar memória
         plt.close(fig_cm)
 
-        # Plota o gráfico de aprendizado do MobileNet usando a função existente
-        fig_lc = self.plot_learning_curves(histories_mobilenet)
+        fig_lc = self.plot_curvas_aprendizado(histories_mobilenet)
 
-        # Insere o gráfico de aprendizado na aba correspondente
-        canvas_lc = FigureCanvasTkAgg(fig_lc, master=learning_curve_frame)
+        # insere o grafico de aprendizado no frame
+        canvas_lc = FigureCanvasTkAgg(fig_lc, master=frame_curva_aprendizado)
         canvas_lc.draw()
         canvas_lc.get_tk_widget().pack()
-
-        # Fecha a figura para liberar memória
         plt.close(fig_lc)
-    # Método para o Menu de Parâmetros
+
+    def executar_modelo_salvo(self):
+        if not os.path.exists('mobilenet_model.h5'):
+            messagebox.showerror("Erro", "O modelo salvo não foi encontrado. Por favor, treine e salve o modelo primeiro.")
+            return
+
+        # solicita a selecao de imagem
+        image_path = filedialog.askopenfilename(title="Selecione uma imagem para classificação", filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
+        if not image_path:
+            return
+
+        # tenta carregar e processar a imagem selecionada
+        try:
+            img = load_img(image_path, target_size=(224, 224))
+            img_array = img_to_array(img)
+            img_array = np.expand_dims(img_array, axis=0)  # adiciona dimensão de lote
+            img_array = preprocess_input(img_array)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar a imagem: {e}")
+            return
+
+        # tenta carregar o modelo salvo
+        try:
+            model : Model = keras.models.load_model('mobilenet_model.h5')
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar o modelo salvo: {e}")
+            return
+
+        # predicao
+        try:
+            y_pred_prob = model.predict(img_array)
+            y_pred = np.array(y_pred_prob > 0.5).astype("int32").flatten()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao fazer a previsão: {e}")
+            return
+
+        class_mapeamento = {1: 'Saudavel', 0: 'Esteatose'}
+        class_label = class_mapeamento.get(y_pred[0], 'Desconhecido')
+
+        messagebox.showinfo("Resultado da Classificação", f"A imagem foi classificada como: {class_label}")
+
     def menu_de_parametros(self):
-        # Cria uma janela para os parâmetros
+
         param_window = Toplevel(self.root)
         param_window.title("Configurar Parâmetros")
         param_window.grab_set()
 
-        # Cria uma barra de menu para a janela de parâmetros
+        # menubar
         param_menu_bar = Menu(param_window)
         param_window.config(menu=param_menu_bar)
 
-        # Cria o menu "Ajuda"
+        # ajuda
         help_menu = Menu(param_menu_bar, tearoff=0)
         param_menu_bar.add_cascade(label="Ajuda", menu=help_menu)
 
-        # Dicionário com as informações dos parâmetros
-        parameters_info = {
+        # informações dos parametros
+        parameters_info : dict = {
             'SVM': {
                 'Kernel': 'Define a função kernel usada pelo SVM.\nOpções:\n- linear: Kernel linear.\n- poly: Kernel polinomial.\n- rbf: Função de base radial.\n- sigmoid: Função sigmoide.',
                 'C': 'Parâmetro de regularização que controla o trade-off entre maximizar a margem e minimizar o erro de classificação.\nValores maiores enfatizam a minimização do erro no treinamento.',
@@ -1257,10 +1405,10 @@ class App(Frame):
             'MobileNet': {
                 'Número de Épocas': 'Número de vezes que o algoritmo irá percorrer todo o conjunto de treinamento.',
                 'Batch Size': 'Número de amostras que serão propagadas através da rede antes de atualizar os pesos.',
-                'Otimizador': 'Algoritmo usado para atualizar os pesos da rede neural.\nOpções comuns:\n- adam\n- sgd\n- rmsprop',
-                'Learning Rate': 'Taxa de aprendizado do otimizador. Controla o tamanho dos passos na otimização.',
+                'Otimizador': 'Algoritmo usado para atualizar os pesos da rede neural.\nOpçoes comuns:\n- adam\n- sgd\n- rmsprop',
+                'Learning Rate': 'Taxa de aprendizado do otimizador. Controla o tamanho dos passos na otimização',
                 'Fine-tune Layers': 'Número de camadas finais do modelo base que serão descongeladas para treinamento (fine-tuning).',
-                'Early Stopping Patience': 'Número de épocas sem melhoria na perda de validação antes de parar o treinamento.',
+                'Early Stopping Patience': 'Número de épocas sem melhoria na perda de validaçao antes de parar o treinamento.',
                 'Loss Function': 'Função de perda utilizada para calcular o erro.\nOpções:\n- binary_crossentropy\n- categorical_crossentropy\n- etc.',
                 'Dropout Rate': 'Taxa de dropout aplicada para prevenir overfitting. Valor entre 0 e 1.',
                 'Activation Function': 'Função de ativação usada nas camadas densas.\nOpções comuns:\n- relu\n- sigmoid\n- tanh',
@@ -1268,45 +1416,39 @@ class App(Frame):
             }
         }
 
-        # Função para exibir a explicação do parâmetro selecionado
         def show_parameter_info(model, param):
             info = parameters_info[model][param]
             messagebox.showinfo(f"Ajuda - {model} - {param}", info)
 
-        # Adiciona submenus para SVM e MobileNet no menu de Ajuda
+        # submenus para svm ou mobilenet no menu de Ajuda
         svm_help_menu = Menu(help_menu, tearoff=0)
         mobilenet_help_menu = Menu(help_menu, tearoff=0)
         help_menu.add_cascade(label="SVM", menu=svm_help_menu)
         help_menu.add_cascade(label="MobileNet", menu=mobilenet_help_menu)
 
-        # Adiciona os parâmetros do SVM ao submenu de Ajuda
         for param in parameters_info['SVM']:
             svm_help_menu.add_command(
                 label=param,
                 command=lambda p=param: show_parameter_info('SVM', p)
             )
 
-        # Adiciona os parâmetros do MobileNet ao submenu de Ajuda
         for param in parameters_info['MobileNet']:
             mobilenet_help_menu.add_command(
                 label=param,
                 command=lambda p=param: show_parameter_info('MobileNet', p)
             )
 
-        # Cria abas para SVM e MobileNet
-        from tkinter import ttk
+        # abas svm e mobilenet
         notebook = ttk.Notebook(param_window)
         notebook.pack(expand=True, fill='both')
 
-        # Parâmetros do SVM
         svm_frame = Frame(notebook)
         notebook.add(svm_frame, text='SVM')
 
-        # Parâmetros do MobileNet
         mobilenet_frame = Frame(notebook)
         notebook.add(mobilenet_frame, text='MobileNet')
 
-        # --- Parâmetros do SVM ---
+        # PARAMETROS DO SVM
         Label(svm_frame, text="Kernel:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
         svm_kernel = StringVar(value=self.parametros_svm.get('kernel', 'linear'))
         Entry(svm_frame, textvariable=svm_kernel).grid(row=0, column=1, padx=5, pady=5)
@@ -1335,7 +1477,7 @@ class App(Frame):
         svm_decision_function_shape = StringVar(value=self.parametros_svm.get('decision_function_shape', 'ovr'))
         Entry(svm_frame, textvariable=svm_decision_function_shape).grid(row=6, column=1, padx=5, pady=5)
 
-        # --- Parâmetros do MobileNet ---
+        # PARAMETROS DO MOBILENET
         Label(mobilenet_frame, text="Número de Épocas:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
         mobilenet_epochs = IntVar(value=self.parametros_mobilenet.get('epochs', 5))
         Entry(mobilenet_frame, textvariable=mobilenet_epochs).grid(row=0, column=1, padx=5, pady=5)
@@ -1376,9 +1518,7 @@ class App(Frame):
         mobilenet_momentum = DoubleVar(value=self.parametros_mobilenet.get('momentum', 0.0))
         Entry(mobilenet_frame, textvariable=mobilenet_momentum).grid(row=9, column=1, padx=5, pady=5)
 
-        # Botão para salvar as configurações
         def salvar_parametros():
-            # Atualiza os parâmetros do SVM
             self.parametros_svm['kernel'] = svm_kernel.get()
             self.parametros_svm['C'] = svm_c.get()
             self.parametros_svm['gamma'] = svm_gamma.get()
@@ -1388,7 +1528,6 @@ class App(Frame):
             self.parametros_svm['class_weight'] = None if class_weight_value == 'None' else class_weight_value
             self.parametros_svm['decision_function_shape'] = svm_decision_function_shape.get()
 
-            # Atualiza os parâmetros do MobileNet
             self.parametros_mobilenet['epochs'] = mobilenet_epochs.get()
             self.parametros_mobilenet['batch_size'] = mobilenet_batch_size.get()
             self.parametros_mobilenet['optimizer'] = mobilenet_optimizer.get()
@@ -1404,7 +1543,6 @@ class App(Frame):
             param_window.destroy()
 
         Button(param_window, text="Salvar", command=salvar_parametros).pack(pady=10)
-
 
 # iniciar o aplicativo
 root = Tk()
