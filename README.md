@@ -21,7 +21,7 @@ A esteatose hepática é uma condição caracterizada pelo acúmulo excessivo de
 
 2. **Instale as bibiliotecas**
    ```bash
-   pip install numpy opencv-python-headless matplotlib pillow scipy scikit-image pyfeats
+   pip install numpy opencv-python-headless matplotlib pillow scipy scikit-image pyfeats pandas seaborn keras tensorflow
 
 3. **Executar o Script**
       ```bash

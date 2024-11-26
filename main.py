@@ -1308,7 +1308,7 @@ class App(Frame):
         notebook.add(frame_matriz_confusao, text='Matrizes de Confusão')
 
         frame_curva_aprendizado = Frame(notebook)
-        notebook.add(frame_curva_aprendizado, text='Gráfico de Aprendizado')
+        
 
         # exibe matrizes de confusão uma do lado da outra
         fig_cm, axes_cm = plt.subplots(1, 2, figsize=(12, 5))
