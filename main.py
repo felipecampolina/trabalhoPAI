@@ -1,31 +1,30 @@
 # Trabalho Prático - Diagnóstico de Esteatose Hepática em Exames de Ultrassom
 # Integrantes(Matricula): Felipe Campolina(762732), Leandro Guido(777801) e Marcelo Augusto(775119)
+
 import os
 import csv
 import re
 import time
 import random
 import re
-from typing import IO
-
-import numpy as np
-import cv2
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from tkinter import Tk, Button, Label, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, Radiobutton, Entry, Frame, DoubleVar, IntVar, ttk
-from PIL import Image, ImageTk
-from skimage.feature import graycomatrix, graycoprops
-import scipy.io
 import pyfeats as pf
 import pandas as pd
 import numpy as np
-from sklearn.svm import SVC
-from sklearn.metrics import confusion_matrix, accuracy_score
-from sklearn.preprocessing import LabelEncoder
 import seaborn as sns
-import tensorflow as tf
+import cv2
+import scipy.io
+from typing import IO
+
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+
+from tkinter import Tk, Button, Label, Menu, filedialog, simpledialog, messagebox, Toplevel, StringVar, Radiobutton, Entry, Frame, DoubleVar, IntVar, ttk
+from PIL import Image, ImageTk
+
+from skimage.feature import graycomatrix
 from sklearn.svm import SVC
-from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.metrics import confusion_matrix
+from sklearn.preprocessing import LabelEncoder
 
 # keras
 import keras._tf_keras.keras as keras
@@ -97,6 +96,7 @@ class App(Frame):
         self.menu_classificacao.add_command(label="Classificar e Comparar", command=self.classificar_e_comparar)
         self.menu_classificacao.add_command(label="Executar Modelo MobileNet Salvo", command=self.executar_modelo_salvo)
         self.menu_classificacao.add_command(label="Menu de Parâmetros", command=self.menu_de_parametros)
+        
         # submenu para opcoes de ROI
         self.menu_roi = Menu(self.menu_opcoes, tearoff=0)
         self.menu_opcoes.add_cascade(label="Opções de ROI", menu=self.menu_roi)
@@ -768,8 +768,8 @@ class App(Frame):
         else:
             return None
         
-# ------------------------------------------------------------------------------------------------------------- Parte 2 - Classificação ----------------------------------------------------------
-   # Parte 2 - Classificação
+    # --------------------------------------------------- PARTE 2
+
     def validacao_cruzada(self, X, y_encoded, pacientes, treinar_avaliar):
         if LOG:
             print(f"Realizando validação cruzada Leave-One-Patient-Out com ordem aleatoria de {len(np.unique(pacientes))} pacientes.")
