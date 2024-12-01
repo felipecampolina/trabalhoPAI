@@ -13,6 +13,7 @@ import numpy as np
 import seaborn as sns
 import cv2
 import scipy.io
+import joblib
 from typing import IO
 
 import matplotlib.pyplot as plt
@@ -33,7 +34,6 @@ from keras._tf_keras.keras.models import Model
 from keras._tf_keras.keras.layers import Dense, GlobalAveragePooling2D, Dropout
 from keras._tf_keras.keras.callbacks import History
 from keras._tf_keras.keras.preprocessing.image import load_img, img_to_array
-
 
 # variaveis para facilitar debug
 CARREGAR_DATASET_AUTOMATICO = False
@@ -88,15 +88,15 @@ class App(Frame):
         self.menu_bar.add_cascade(label="Opções", menu=self.menu_opcoes)
         self.menu_opcoes.add_command(label="Carregar imagem para edição", command=self.carregar_imagem)
 
-
         self.menu_classificacao = Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="Classificação", menu=self.menu_classificacao)
         self.menu_classificacao.add_command(label="Classificar com SVM", command=self.classificar_com_svm)
         self.menu_classificacao.add_command(label="Classificar com MobileNet", command=self.classificar_com_mobilenet)
-        self.menu_classificacao.add_command(label="Classificar e Comparar", command=self.classificar_e_comparar)
-        self.menu_classificacao.add_command(label="Executar Modelo MobileNet Salvo", command=self.executar_modelo_salvo)
+        self.menu_classificacao.add_command(label="Classificar e comparar", command=self.classificar_e_comparar)
+        self.menu_classificacao.add_command(label="Executar modelo MobileNet salvo", command=self.executar_modelo_salvo_mobilenet)
+        self.menu_classificacao.add_command(label="Executar modelo SVM salvo", command=self.executar_modelo_salvo_svm)
         self.menu_classificacao.add_command(label="Menu de Parâmetros", command=self.menu_de_parametros)
-        
+
         # submenu para opcoes de ROI
         self.menu_roi = Menu(self.menu_opcoes, tearoff=0)
         self.menu_opcoes.add_cascade(label="Opções de ROI", menu=self.menu_roi)
@@ -785,8 +785,9 @@ class App(Frame):
         f1_scores = []
         matrizes_confusao = []
         histories = []
-        model : Model = None
-    
+        model : Model | SVC = None
+        melhor_modelo : Model | SVC = None
+
         best_accuracy = 0.0
         fold_number = 1
 
@@ -838,13 +839,13 @@ class App(Frame):
             if 'history' in result:
                 histories.append(history)
 
-            self.salvar_matriz_confusao_como_imagem(matriz_confusao, filename = os.path.join(conf_matrix_dir, f"matriz_confusao_fold_{fold_number}.png"))
+            if treinar_avaliar == self.treinar_avaliar_mobilenet:
+                self.salvar_matriz_confusao_como_imagem(matriz_confusao, filename = os.path.join(conf_matrix_dir, f"matriz_confusao_fold_{fold_number}.png"))
 
             # comparar e salvar o melhor modelo
             if accuracy > best_accuracy:
                 best_accuracy = accuracy
-                if model is not None:
-                    model.save('mobilenet_model.h5')
+                melhor_modelo = model
 
             if LOG:
                 print(f"Fold {fold_number} - Paciente {paciente_teste} (aleatório): Acurácia={accuracy:.4f}, Sensibilidade={sensitivity:.4f}, Especificidade={specificity:.4f}, Precisão={precision:.4f}, F1-score={f1_score:.4f}")
@@ -856,7 +857,7 @@ class App(Frame):
         media_specificity = np.mean(specificities)
         media_precision = np.mean(precisions)
         media_f1_score = np.mean(f1_scores)
-        return media_accuracy, media_sensitivity, media_specificity, media_precision, media_f1_score, matrizes_confusao, histories
+        return media_accuracy, media_sensitivity, media_specificity, media_precision, media_f1_score, matrizes_confusao, histories, melhor_modelo
 
     def salvar_matriz_confusao_como_imagem(self, matriz_confusao, filename):
         plt.figure(figsize=(6, 4))
@@ -985,6 +986,7 @@ class App(Frame):
         result['precision'] = precision
         result['f1_score'] = f1
         result['matriz_confusao'] = matriz_confusao
+        result['model'] = classificador_svm
 
         return result
 
@@ -1014,9 +1016,12 @@ class App(Frame):
         start_time = time.time()
 
         # VALIDACAO CRUZADA
-        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, _ = self.validacao_cruzada(
+        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, _, melhor_modelo = self.validacao_cruzada(
             X, y_encoded, patient_numbers, self.treinar_avaliar_svm
         )
+
+        # salvando classificador
+        joblib.dump(melhor_modelo, "svm_model.sav")
 
         execution_time = time.time() - start_time 
 
@@ -1147,9 +1152,12 @@ class App(Frame):
         start_time = time.time()
 
         # VALIDACAO CRUZADA
-        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, histories = self.validacao_cruzada(
+        avg_accuracy, avg_sensitivity, avg_specificity, avg_precision, avg_f1_score, matrizes_confusao, histories, melhor_modelo = self.validacao_cruzada(
             X, y_encoded, patient_numbers, self.treinar_avaliar_mobilenet
         )
+
+        # salvando o modelo
+        melhor_modelo.save('mobilenet_model.h5')
 
         execution_time = time.time() - start_time
 
@@ -1337,7 +1345,7 @@ class App(Frame):
         canvas_lc.get_tk_widget().pack()
         plt.close(fig_lc)
 
-    def executar_modelo_salvo(self):
+    def executar_modelo_salvo_mobilenet(self):
         if not os.path.exists('mobilenet_model.h5'):
             messagebox.showerror("Erro", "O modelo salvo não foi encontrado. Por favor, treine e salve o modelo primeiro.")
             return
@@ -1368,6 +1376,59 @@ class App(Frame):
         try:
             y_pred_prob = model.predict(img_array)
             y_pred = np.array(y_pred_prob > 0.5).astype("int32").flatten()
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao fazer a previsão: {e}")
+            return
+
+        class_mapeamento = {1: 'Saudavel', 0: 'Esteatose'}
+        class_label = class_mapeamento.get(y_pred[0], 'Desconhecido')
+
+        messagebox.showinfo("Resultado da Classificação", f"A imagem foi classificada como: {class_label}")
+
+    def executar_modelo_salvo_svm(self):
+        if not os.path.exists('svm_model.sav'):
+            messagebox.showerror("Erro", "O modelo salvo não foi encontrado. Por favor, treine e salve o modelo primeiro.")
+            return
+
+        # solicita a selecao de imagem
+        image_path = filedialog.askopenfilename(title="Selecione uma imagem para classificação", filetypes=[("Image files", "*.png;*.jpg;*.jpeg")])
+        if not image_path:
+            return
+
+        # tenta carregar e processar a imagem selecionada
+        try:
+            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE).astype(np.uint8)
+
+            # calculo dos descritores de textura 
+            entropias, homogeneidades, _ = self.calcular_descritores_glcm(img, exibir_matrizes=False)
+
+            # multiplicacao por 10 para normalizar os resultados
+
+            # calculo sfn
+            features, _ = pf.sfm_features(f=img, mask=None, Lr=4, Lc=4)
+            coarseness = features[0] * 10
+            contrast = features[1] * 10
+            periodicity = features[2]
+            roughness = features[3] * 10
+
+            dados = np.array([coarseness, contrast, periodicity, roughness, entropias[0] * 10, entropias[1] * 10, entropias[2] * 10, entropias[3] * 10, homogeneidades[0] * 10, homogeneidades[1] * 10, homogeneidades[2]* 10, homogeneidades[3]* 10])
+            if LOG:
+                print(dados)
+
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar a imagem: {e}")
+            return
+
+        # tenta carregar o modelo salvo
+        try:
+            classificador_svm : SVC = joblib.load('svm_model.sav')
+        except Exception as e:
+            messagebox.showerror("Erro", f"Não foi possível carregar o modelo salvo: {e}")
+            return
+
+        # predicao
+        try:
+            y_pred = classificador_svm.predict(dados.reshape(1, -1))
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao fazer a previsão: {e}")
             return
